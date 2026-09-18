@@ -6,26 +6,67 @@ drawn as real pixels through kitty's graphics protocol — no ASCII art.
 
 Written from scratch; inspired by the (dormant) `termpdf.py`.
 
+## Usage
+
+```sh
+kittypdf book.pdf              # or the `pdf` alias
+kittypdf -p 20 book.pdf        # open at page 20 (1-based)
+kittypdf -m dual book.pdf      # start layout: auto | single | dual
+kittypdf -V                    # version
+```
+
 ## Keys
 
 Movement follows the colemak diamond (`u` = up, `e` = down), as in a colemak
 vim setup. `i` — the diamond's right slot — stays on invert colors: a reader
 has no horizontal motion, so nothing competes for it.
 
+**Paging**
+
 | Key | Action |
 |---|---|
-| `e` / `↓` / `Space` | next page (accepts a count: `10e`) |
+| `e` / `↓` / `Space` / `Enter` | next page |
 | `u` / `↑` | previous page |
-| `E` / `U` | big jump: 10 pages forward / back (`3E` → 30 pages) |
+| `E` / `U` | big jump: 10 pages forward / back |
+| `PgDn` / `PgUp` | next / previous page |
+| `j` / `k` / `b` | qwerty aliases (`j` next, `k` / `b` back) |
+
+**Jumping**
+
+| Key | Action |
+|---|---|
 | `gg` | first page |
-| `G` | last page (`12G` jumps to page 12) |
+| `G` | last page |
+| `Home` / `End` | first / last page |
+| `t` | table of contents overlay |
+
+**Display**
+
+| Key | Action |
+|---|---|
 | `i` | invert colors (dark reading) |
-| `t` | table of contents overlay (`e`/`u` pick, `Enter` jumps, `q`/`Esc` closes) |
 | `c` | toggle autocrop (trim page margins) |
 | `d` | cycle page layout: auto → single → dual |
 | `r` / `Ctrl-L` | redraw current page |
-| `q` / `Q` | quit |
-| `j` / `k` / `b` | qwerty aliases: `j` next page, `k` / `b` previous page |
+
+**Quitting**
+
+| Key | Action |
+|---|---|
+| `q` / `Q` / `Ctrl-C` | quit (saves progress) |
+
+**Counts** work like vim: `10e` ten pages forward, `3E` thirty, `12G` page 12,
+`5gg` page 5. Any unrelated key clears the pending count.
+
+**In a spread** `e` / `u` step two pages at a time.
+
+## Table of contents
+
+`t` opens the chapter list from the PDF outline. Move with `e` / `u` (or
+`j` / `k`, arrows), `E` / `U` jump ten, `gg` / `G` go to the ends, `Enter`
+jumps to the selected chapter, `q` / `Esc` closes the overlay. `t`
+deliberately does **not** close it: the key that opens a mode must not also
+close it, or holding it oscillates the overlay open and shut.
 
 ## Dual-page spreads
 
@@ -37,8 +78,16 @@ Press `d` to cycle auto → single → dual, or start with `-m/--mode
 {auto,single,dual}`. In a spread, `e`/`u` move by two pages and the status
 bar shows a range like `[3-4/120]`.
 
+## Status bar
+
+`[3-4/120]-c d` reads as: pages 3–4 of 120, `-` invert is on, `c` autocrop is
+on. A trailing mode flag (`s` single / `d` dual) appears only when the layout
+was forced with `d` or `-m`; auto shows no flag.
+
+## Progress memory
+
 The last-read page, invert and crop settings are remembered per file
-(~/.cache/kittypdf/). Autocrop probes each page for its content bounding
+(`~/.cache/kittypdf/`). Autocrop probes each page for its content bounding
 box at low resolution; pages whose paper is darker than the threshold
 (dense scans) simply stay uncropped.
 
