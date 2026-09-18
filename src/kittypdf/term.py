@@ -125,6 +125,19 @@ class Terminal:
             return data
         return os.read(self.fd, size)
 
+    def drain_typeahead(self):
+        """Drop queued input (pushback buffer + kernel tty queue).
+
+        Used when crossing mode boundaries (entering/leaving the ToC
+        overlay): a held key would otherwise oscillate open/close/open
+        from its repeat backlog long after release.
+        """
+        self._buf = b""
+        try:
+            termios.tcflush(self.fd, termios.TCIFLUSH)
+        except termios.error:
+            pass
+
     def _read_more(self, timeout):
         if self._eof:
             return False

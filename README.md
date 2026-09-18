@@ -20,7 +20,7 @@ has no horizontal motion, so nothing competes for it.
 | `gg` | first page |
 | `G` | last page (`12G` jumps to page 12) |
 | `i` | invert colors (dark reading) |
-| `t` | table of contents overlay (`e`/`u` pick, `Enter` jumps, `t`/`q` closes) |
+| `t` | table of contents overlay (`e`/`u` pick, `Enter` jumps, `q`/`Esc` closes) |
 | `c` | toggle autocrop (trim page margins) |
 | `r` / `Ctrl-L` | redraw current page |
 | `q` / `Q` | quit |
