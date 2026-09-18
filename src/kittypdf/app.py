@@ -194,6 +194,9 @@ def _loop(reader, doc, term, path, progress):
         if event is None:
             continue
         kind, val = event
+        if kind == "eof":  # stdin closed (pty hung up): quit the normal way
+            progress.save(path, reader.page)
+            return
         if kind == "key" and val == "ignored":
             continue  # unknown sequences never touch the count buffer
 
