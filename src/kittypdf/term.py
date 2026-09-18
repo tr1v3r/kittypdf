@@ -52,12 +52,15 @@ class Terminal:
             signal.signal(signal.SIGWINCH, self._on_winch)
         except ValueError:
             pass  # not the main thread; resizes will be picked up lazily
-        self.write("\x1b[?1049h\x1b[?25l\x1b[2J")
+        # Force legacy key encoding: push empty kitty-keyboard flags so a
+        # protocol left enabled by a prior full-screen app (nvim, a TUI)
+        # cannot deliver keys as CSI-u that our reader would drop.
+        self.write("\x1b[?1049h\x1b[?25l\x1b[>0u\x1b[2J")
         self.refresh_size()
 
     def exit(self):
         try:
-            self.write("\x1b[?25h\x1b[?1049l")
+            self.write("\x1b[<u\x1b[?25h\x1b[?1049l")  # pop keyboard flags
         except Exception:
             pass
         if self._attrs is not None:
@@ -188,6 +191,32 @@ class Terminal:
                 wait = None
             self._read_more(wait)
 
+    def _decode_csi_u(self, params):
+        """Decode a kitty-keyboard CSI-u key: CSI <codepoint>[;<mods>] u."""
+        head = params.split(b";")
+        try:
+            cp = int(head[0])
+        except ValueError:
+            return ("key", "ignored")
+        mods = 0
+        if len(head) > 1 and head[1].split(b":")[0].isdigit():
+            mods = (int(head[1].split(b":")[0]) - 1) & 0xF
+        if cp in (13,):
+            return ("enter", "\r")
+        if cp == 27:
+            return ("esc", "")
+        if cp in (8, 127):
+            return ("backspace", "")
+        if cp == 9:
+            return ("char", "\t")
+        try:
+            ch = chr(cp)
+        except (ValueError, OverflowError):
+            return ("key", "ignored")
+        if mods & 0x4:  # ctrl
+            return ("ctrl", chr(cp).upper())
+        return ("char", ch)
+
     def _decode(self):
         buf = self._buf
         if not buf:
@@ -218,9 +247,12 @@ class Terminal:
         if buf[1] in (0x5B, 0x4F):  # CSI or SS3
             for i in range(2, len(buf)):
                 if 0x40 <= buf[i] <= 0x7E:  # final byte
-                    seq = bytes(buf[2:i + 1])
+                    params = bytes(buf[2:i])
+                    final = buf[i]
                     self._buf = buf[i + 1:]
-                    return ("key", _CSI_KEYS.get(seq, "ignored"))
+                    if final == 0x75:  # 'u' -> kitty keyboard protocol (CSI-u)
+                        return self._decode_csi_u(params)
+                    return ("key", _CSI_KEYS.get(params + bytes([final]), "ignored"))
             return None  # incomplete sequence
         # ESC + non-introducer: treat as alt-modified key, decode the base
         self._buf = buf[1:]
