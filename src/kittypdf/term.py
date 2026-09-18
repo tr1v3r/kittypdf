@@ -36,6 +36,7 @@ class Terminal:
         self.fd = sys.stdin.fileno()
         self._attrs = None
         self._buf = b""
+        self._eof = False
         self._winch = False
         self.rows = self.cols = 1
         self.xpixel = self.ypixel = 0
@@ -125,11 +126,14 @@ class Terminal:
         return os.read(self.fd, size)
 
     def _read_more(self, timeout):
+        if self._eof:
+            return False
         if select.select([self.fd], [], [], timeout)[0]:
             chunk = os.read(self.fd, 4096)
             if chunk:
                 self._buf += chunk
                 return True
+            self._eof = True  # ready fd + b"": stdin is closed (EOF)
         return False
 
     def read_key(self, timeout=None):
@@ -137,7 +141,8 @@ class Terminal:
 
         Returns a (kind, value) tuple, or None on timeout. Kinds:
         'char' (printable), 'ctrl' (value 'A'..'Z'), 'key' (named:
-        up/down/... /ignored), 'enter', 'backspace', 'esc'.
+        up/down/... /ignored), 'enter', 'backspace', 'esc', 'eof'
+        (stdin closed; sticky — buffered keys are drained first).
         """
         deadline = None if timeout is None else time.monotonic() + timeout
         while True:
@@ -160,6 +165,8 @@ class Terminal:
                 # non-ESC prefix that failed to decode should not happen
                 self._buf = self._buf[1:]
                 continue
+            if self._eof:
+                return ("eof", "")
             if deadline is not None:
                 wait = deadline - time.monotonic()
                 if wait <= 0:
