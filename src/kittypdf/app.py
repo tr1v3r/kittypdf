@@ -12,6 +12,17 @@ from .term import Terminal
 
 _IMAGE_ID = 1
 
+# Colemak-flavoured bindings: e/u move down/up (the vertical half of the
+# colemak movement diamond), E/U are its big-jump variants.  j/k/b remain as
+# qwerty aliases — terminals deliver layout-translated bytes, so they cannot
+# collide with the colemak keys.
+_BIG_JUMP = 10
+_STEP_KEYS = {
+    "e": +1, "j": +1, " ": +1,
+    "u": -1, "k": -1, "b": -1,
+    "E": +_BIG_JUMP, "U": -_BIG_JUMP,
+}
+
 
 class Progress:
     """Remember the last-read page per file under ~/.cache/kittypdf/."""
@@ -194,12 +205,8 @@ def _loop(reader, doc, term, path, progress):
                 count += val
                 reader.status(count)
                 continue
-            if val == "j":
-                reader.step(+1, n)
-            elif val in ("k", "b"):
-                reader.step(-1, n)
-            elif val == " ":
-                reader.step(+1, n)
+            if val in _STEP_KEYS:
+                reader.step(_STEP_KEYS[val], n)
             elif val == "g":
                 if pending_g:
                     reader.goto(0, n if count else None)
@@ -215,7 +222,7 @@ def _loop(reader, doc, term, path, progress):
             elif val in ("r", "R"):
                 reader.invalidate()
                 moved = True
-            elif val == "q":
+            elif val in ("q", "Q"):
                 progress.save(path, reader.page)
                 return
             else:
