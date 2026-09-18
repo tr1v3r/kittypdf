@@ -12,6 +12,9 @@ from .term import Terminal
 from .toc import toc_loop
 
 _IMAGE_ID = 1
+_IMAGE_ID_R = 2          # right page in dual-page (spread) mode
+_GUTTER_CELLS = 1        # blank columns between the two pages of a spread
+_MODES = ("auto", "single", "dual")
 
 # Colemak-flavoured bindings: e/u move down/up (the vertical half of the
 # colemak movement diamond), E/U are its big-jump variants.  j/k/b remain as
@@ -75,14 +78,49 @@ class Reader:
         self.page = 0
         self.invert = False
         self.autocrop = False
-        self._sent = None        # signature of the transmitted image
-        self._size = (1, 1)      # pixel size of the transmitted image
+        self.mode = "auto"       # auto | single | dual
+        self._sent = None        # signature of what is currently on screen
+        self._spread = False     # whether the last draw was a two-page spread
+        self._size = (1, 1)      # single-page image pixel size
+        self._spread_imgs = [None, None]  # cached (png, w, h) for the pair
 
-    # -- drawing --------------------------------------------------------
+    # -- layout ---------------------------------------------------------
 
     def _viewport(self):
         t = self.term
         return t.xpixel, int((t.rows - 1) * t.cell_h)
+
+    def _want_spread(self, avail_w, avail_h):
+        """Decide whether to show two pages side by side.
+
+        auto: pick the layout that renders the pages larger — a spread wins
+        only when the viewport is wide enough that a single page would just
+        be limited by height and waste the sides.
+        """
+        if self.mode == "single":
+            return False
+        if self.doc.page_count < 2:
+            return False
+        pw, ph = self.doc.page_size(self.page, autocrop=self.autocrop)
+        if self.mode == "dual":
+            return True
+        gutter = _GUTTER_CELLS * self.term.cell_w
+        single = min(avail_w / pw, avail_h / ph)
+        double = min((avail_w - gutter) / (2 * pw), avail_h / ph)
+        # A spread wins whenever two pages fit without shrinking either below
+        # the single-page size — i.e. when a single page is height-limited and
+        # the freed horizontal space can hold the second page. When both are
+        # height-limited the two sizes are equal, and a spread is pure win
+        # (same size, twice the content), so accept equality.
+        return double >= single - 1e-6
+
+    def _pair(self):
+        """(left, right) 0-based page numbers for the current spread."""
+        left = self.page - (self.page % 2)   # spreads start on even pages
+        right = left + 1 if left + 1 < self.doc.page_count else None
+        return left, right
+
+    # -- drawing --------------------------------------------------------
 
     def invalidate(self):
         """Force a re-render (and wipe leftovers) on resize/refresh."""
@@ -93,7 +131,16 @@ class Reader:
     def draw(self):
         t = self.term
         avail_w, avail_h = self._viewport()
-        sig = (self.page, self.invert, self.autocrop, avail_w, avail_h)
+        spread = self._want_spread(avail_w, avail_h)
+        self._spread = spread
+        if spread:
+            self._draw_spread(avail_w, avail_h)
+        else:
+            self._draw_single(avail_w, avail_h)
+
+    def _draw_single(self, avail_w, avail_h):
+        t = self.term
+        sig = ("single", self.page, self.invert, self.autocrop, avail_w, avail_h)
         if sig != self._sent:
             try:
                 png, w, h = self.doc.render(self.page, avail_w, avail_h,
@@ -102,6 +149,7 @@ class Reader:
             except Exception as exc:  # noqa: BLE001 - report and stay alive
                 self.status(msg=f"render error: {exc}")
                 return
+            graphics.delete_image(t, _IMAGE_ID_R)
             graphics.delete_image(t, _IMAGE_ID)
             graphics.send_image(t, _IMAGE_ID, png)
             self._sent = sig
@@ -111,11 +159,64 @@ class Reader:
         row = int((avail_h - h) / 2 / t.cell_h) + 1
         graphics.place(t, _IMAGE_ID, row, col)
 
+    def _draw_spread(self, avail_w, avail_h):
+        t = self.term
+        left, right = self._pair()
+        sig = ("dual", left, right, self.invert, self.autocrop, avail_w, avail_h)
+        gutter = _GUTTER_CELLS * t.cell_w
+        half = (avail_w - gutter) / 2
+        if sig != self._sent:
+            try:
+                imgs = []
+                for pno in (left, right):
+                    if pno is None:
+                        imgs.append(None)
+                        continue
+                    png, w, h = self.doc.render(pno, half, avail_h,
+                                                invert=self.invert,
+                                                autocrop=self.autocrop)
+                    imgs.append((png, w, h))
+            except Exception as exc:  # noqa: BLE001
+                self.status(msg=f"render error: {exc}")
+                return
+            graphics.delete_image(t, _IMAGE_ID)
+            graphics.delete_image(t, _IMAGE_ID_R)
+            if imgs[0]:
+                graphics.send_image(t, _IMAGE_ID, imgs[0][0])
+            if imgs[1]:
+                graphics.send_image(t, _IMAGE_ID_R, imgs[1][0])
+            self._sent = sig
+            self._spread_imgs = imgs
+        imgs = self._spread_imgs
+        # left page: right-aligned against the gutter; right page: left-aligned
+        if imgs[0]:
+            _, w, h = imgs[0]
+            x = half - w                      # hug the centre gutter
+            row = int((avail_h - h) / 2 / t.cell_h) + 1
+            col = int(x / t.cell_w) + 1
+            graphics.place(t, _IMAGE_ID, row, max(col, 1))
+        if imgs[1]:
+            _, w, h = imgs[1]
+            x = half + gutter                 # start just past the gutter
+            row = int((avail_h - h) / 2 / t.cell_h) + 1
+            col = int(x / t.cell_w) + 1
+            graphics.place(t, _IMAGE_ID_R, row, col)
+
     def status(self, count="", msg=""):
         t = self.term
         left = msg or (count if count else "kittypdf")
         flags = ("-" if self.invert else "") + ("c" if self.autocrop else "")
-        right = f"[{self.page + 1}/{self.doc.page_count}]{flags}"
+        if self.mode != "auto":
+            flags += self.mode[0]            # 's' or 'd' when forced
+        if self._spread:
+            lp, rp = self._pair()
+            if rp is not None:
+                pages = f"{lp + 1}-{rp + 1}"
+            else:
+                pages = f"{lp + 1}"
+        else:
+            pages = f"{self.page + 1}"
+        right = f"[{pages}/{self.doc.page_count}]{flags}"
         pad = max(1, t.cols - len(left) - len(right) - 2)
         t.write(f"\x1b[{t.rows};1H\x1b[2K {left}{' ' * pad}{right} ")
 
@@ -124,14 +225,21 @@ class Reader:
     def clamp(self, page):
         return max(0, min(self.doc.page_count - 1, page))
 
+    def _stride(self):
+        """Pages moved per step: 2 in a spread, 1 otherwise."""
+        return 2 if self._spread else 1
+
     def step(self, delta, count):
-        self.page = self.clamp(self.page + delta * count)
+        self.page = self.clamp(self.page + delta * count * self._stride())
+        if self._spread:
+            self.page -= self.page % 2       # keep spreads aligned to pairs
 
     def goto(self, page, count=None):
-        if count is not None:
-            self.page = self.clamp(count - 1)
-        else:
-            self.page = self.clamp(page)
+        target = (count - 1) if count is not None else page
+        self.page = self.clamp(target)
+
+    def cycle_mode(self):
+        self.mode = _MODES[(_MODES.index(self.mode) + 1) % len(_MODES)]
 
 
 def main(argv=None):
@@ -141,6 +249,8 @@ def main(argv=None):
     parser.add_argument("file", help="path to a PDF file")
     parser.add_argument("-p", "--page", type=int, default=None,
                         help="open at this page (1-based)")
+    parser.add_argument("-m", "--mode", choices=_MODES, default="auto",
+                        help="page layout: auto (default), single, or dual")
     parser.add_argument("-V", "--version", action="version",
                         version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
@@ -174,6 +284,7 @@ def main(argv=None):
         reader = Reader(doc, term)
         reader.invert = state["invert"]
         reader.autocrop = state["crop"]
+        reader.mode = args.mode
         start = state["page"]
         if args.page is not None:
             start = args.page - 1
@@ -239,6 +350,10 @@ def _loop(reader, doc, term, path, progress):
                 moved = True
             elif val == "c":
                 reader.autocrop = not reader.autocrop
+                moved = True
+            elif val == "d":
+                reader.cycle_mode()
+                reader.invalidate()   # layout change: wipe and re-lay-out
                 moved = True
             elif val == "t":
                 term.drain_typeahead()  # drop repeat backlog before entering

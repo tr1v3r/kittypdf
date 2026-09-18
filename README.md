@@ -22,9 +22,20 @@ has no horizontal motion, so nothing competes for it.
 | `i` | invert colors (dark reading) |
 | `t` | table of contents overlay (`e`/`u` pick, `Enter` jumps, `q`/`Esc` closes) |
 | `c` | toggle autocrop (trim page margins) |
+| `d` | cycle page layout: auto → single → dual |
 | `r` / `Ctrl-L` | redraw current page |
 | `q` / `Q` | quit |
 | `j` / `k` / `b` | qwerty aliases: `j` next page, `k` / `b` previous page |
+
+## Dual-page spreads
+
+By default the layout is **auto**: kittypdf shows two pages side by side
+whenever the window is wide enough that a single page would only be
+limited by height (e.g. a portrait PDF in a full-screen wide terminal),
+and falls back to a single page otherwise. Resizing re-evaluates it live.
+Press `d` to cycle auto → single → dual, or start with `-m/--mode
+{auto,single,dual}`. In a spread, `e`/`u` move by two pages and the status
+bar shows a range like `[3-4/120]`.
 
 The last-read page, invert and crop settings are remembered per file
 (~/.cache/kittypdf/). Autocrop probes each page for its content bounding
