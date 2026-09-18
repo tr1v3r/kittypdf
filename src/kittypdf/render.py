@@ -19,6 +19,16 @@ class Document:
         self.toc = self.doc.get_toc()  # [[level, title, page_1based], ...]
         self._crop_cache = {}
 
+    def page_size(self, page_no, autocrop=False):
+        """(width, height) of the page in points, honouring autocrop."""
+        page = self.doc.load_page(page_no)
+        rect = page.rect
+        if autocrop:
+            content = self._content_rect(page_no, page)
+            if content is not None:
+                rect = content
+        return max(rect.width, 1.0), max(rect.height, 1.0)
+
     def render(self, page_no, max_w, max_h, invert=False, autocrop=False):
         """Render 0-based `page_no` to fit (max_w, max_h) pixels.
 
