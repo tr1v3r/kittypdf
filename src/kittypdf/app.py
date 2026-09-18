@@ -9,6 +9,7 @@ import sys
 from . import __version__, graphics
 from .render import Document
 from .term import Terminal
+from .toc import toc_loop
 
 _IMAGE_ID = 1
 
@@ -25,7 +26,7 @@ _STEP_KEYS = {
 
 
 class Progress:
-    """Remember the last-read page per file under ~/.cache/kittypdf/."""
+    """Remember reader state per file under ~/.cache/kittypdf/."""
 
     def __init__(self):
         base = os.environ.get("XDG_CACHE_HOME",
@@ -40,21 +41,27 @@ class Progress:
         key = hashlib.sha1(os.path.abspath(path).encode()).hexdigest()[:16]
         return os.path.join(self.dir, f"{key}.json")
 
-    def load(self, path, default=0):
+    def load(self, path):
+        state = {"page": 0, "invert": False, "crop": False}
         if not self.dir:
-            return default
+            return state
         try:
             with open(self._file(path)) as fh:
-                return int(json.load(fh).get("page", default))
+                saved = json.load(fh)
         except (OSError, ValueError):
-            return default
+            return state
+        if isinstance(saved, dict):
+            state["page"] = int(saved.get("page", 0))
+            state["invert"] = bool(saved.get("invert", False))
+            state["crop"] = bool(saved.get("crop", False))
+        return state
 
-    def save(self, path, page):
+    def save(self, path, page, invert=False, crop=False):
         if not self.dir:
             return
         try:
             with open(self._file(path), "w") as fh:
-                json.dump({"page": page}, fh)
+                json.dump({"page": page, "invert": invert, "crop": crop}, fh)
         except OSError:
             pass
 
@@ -67,6 +74,7 @@ class Reader:
         self.term = term
         self.page = 0
         self.invert = False
+        self.autocrop = False
         self._sent = None        # signature of the transmitted image
         self._size = (1, 1)      # pixel size of the transmitted image
 
@@ -85,13 +93,14 @@ class Reader:
     def draw(self):
         t = self.term
         avail_w, avail_h = self._viewport()
-        sig = (self.page, self.invert, avail_w, avail_h)
+        sig = (self.page, self.invert, self.autocrop, avail_w, avail_h)
         if sig != self._sent:
             try:
                 png, w, h = self.doc.render(self.page, avail_w, avail_h,
-                                            invert=self.invert)
+                                            invert=self.invert,
+                                            autocrop=self.autocrop)
             except Exception as exc:  # noqa: BLE001 - report and stay alive
-                self.status(f"render error: {exc}")
+                self.status(msg=f"render error: {exc}")
                 return
             graphics.delete_image(t, _IMAGE_ID)
             graphics.send_image(t, _IMAGE_ID, png)
@@ -105,7 +114,7 @@ class Reader:
     def status(self, count="", msg=""):
         t = self.term
         left = msg or (count if count else "kittypdf")
-        flags = "-" if self.invert else ""
+        flags = ("-" if self.invert else "") + ("c" if self.autocrop else "")
         right = f"[{self.page + 1}/{self.doc.page_count}]{flags}"
         pad = max(1, t.cols - len(left) - len(right) - 2)
         t.write(f"\x1b[{t.rows};1H\x1b[2K {left}{' ' * pad}{right} ")
@@ -161,8 +170,11 @@ def main(argv=None):
             return 2
 
         progress = Progress()
+        state = progress.load(args.file)
         reader = Reader(doc, term)
-        start = progress.load(args.file)
+        reader.invert = state["invert"]
+        reader.autocrop = state["crop"]
+        start = state["page"]
         if args.page is not None:
             start = args.page - 1
         reader.page = reader.clamp(start)
@@ -184,6 +196,9 @@ def _loop(reader, doc, term, path, progress):
     reader.draw()
     reader.status()
 
+    def checkpoint():
+        progress.save(path, reader.page, reader.invert, reader.autocrop)
+
     while True:
         if term.take_resize():
             reader.invalidate()
@@ -195,7 +210,7 @@ def _loop(reader, doc, term, path, progress):
             continue
         kind, val = event
         if kind == "eof":  # stdin closed (pty hung up): quit the normal way
-            progress.save(path, reader.page)
+            checkpoint()
             return
         if kind == "key" and val == "ignored":
             continue  # unknown sequences never touch the count buffer
@@ -222,11 +237,22 @@ def _loop(reader, doc, term, path, progress):
             elif val == "i":
                 reader.invert = not reader.invert
                 moved = True
+            elif val == "c":
+                reader.autocrop = not reader.autocrop
+                moved = True
+            elif val == "t":
+                action, value = toc_loop(term, doc.toc, reader.page)
+                if action == "eof":
+                    checkpoint()
+                    return
+                if action == "jump":
+                    reader.page = reader.clamp(value)
+                moved = True  # the overlay wiped the screen: redraw either way
             elif val in ("r", "R"):
                 reader.invalidate()
                 moved = True
             elif val in ("q", "Q"):
-                progress.save(path, reader.page)
+                checkpoint()
                 return
             else:
                 count = ""  # any unrelated key clears the pending count
@@ -249,7 +275,7 @@ def _loop(reader, doc, term, path, progress):
             reader.step(+1, n)
         elif kind == "ctrl" and val in ("C", "L"):
             if val == "C":
-                progress.save(path, reader.page)
+                checkpoint()
                 return
             reader.invalidate()
             moved = True
@@ -262,7 +288,7 @@ def _loop(reader, doc, term, path, progress):
         pending_g = False
         reader.draw()
         reader.status()
-        progress.save(path, reader.page)
+        checkpoint()
 
 
 if __name__ == "__main__":

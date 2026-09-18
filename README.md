@@ -20,11 +20,16 @@ has no horizontal motion, so nothing competes for it.
 | `gg` | first page |
 | `G` | last page (`12G` jumps to page 12) |
 | `i` | invert colors (dark reading) |
+| `t` | table of contents overlay (`e`/`u` pick, `Enter` jumps, `t`/`q` closes) |
+| `c` | toggle autocrop (trim page margins) |
 | `r` / `Ctrl-L` | redraw current page |
 | `q` / `Q` | quit |
 | `j` / `k` / `b` | qwerty aliases: `j` next page, `k` / `b` previous page |
 
-The last-read page is remembered per file (`~/.cache/kittypdf/`).
+The last-read page, invert and crop settings are remembered per file
+(~/.cache/kittypdf/). Autocrop probes each page for its content bounding
+box at low resolution; pages whose paper is darker than the threshold
+(dense scans) simply stay uncropped.
 
 ## Install
 
