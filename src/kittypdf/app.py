@@ -250,10 +250,13 @@ def _loop(reader, doc, term, path, progress):
                     return
                 if action == "jump":
                     reader.page = reader.clamp(value)
-                # Wipe the overlay text before restoring the page: the image
-                # data survives in terminal memory, so this is just an erase
-                # plus a re-place/re-render.
-                term.write("\x1b[2J")
+                # The overlay cleared the screen; force a full re-transmit so
+                # the page image reappears. A place-only restore (same page,
+                # unchanged signature) does NOT bring the image back once the
+                # overlay's erase has dropped the placement -- which is why
+                # cancel (q/Esc) looked stuck on the ToC while Enter, which
+                # changes the page and re-transmits, worked.
+                reader.invalidate()
                 moved = True
             elif val in ("r", "R"):
                 reader.invalidate()
