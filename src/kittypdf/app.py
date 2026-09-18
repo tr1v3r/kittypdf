@@ -247,7 +247,11 @@ def _loop(reader, doc, term, path, progress):
                     return
                 if action == "jump":
                     reader.page = reader.clamp(value)
-                moved = True  # the overlay wiped the screen: redraw either way
+                # Wipe the overlay text before restoring the page: the image
+                # data survives in terminal memory, so this is just an erase
+                # plus a re-place/re-render.
+                term.write("\x1b[2J")
+                moved = True
             elif val in ("r", "R"):
                 reader.invalidate()
                 moved = True
