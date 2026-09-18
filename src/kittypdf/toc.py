@@ -74,7 +74,7 @@ def _draw(term, toc, sel, top):
             term.write(f"\x1b[{i - top + 2};1H\x1b[7m{line}\x1b[27m")
         else:
             term.write(f"\x1b[{i - top + 2};1H{line}")
-    hint = _fit(" e/u move · Enter jump · t/q close", term.cols - 1)
+    hint = _fit(" e/u move · Enter jump · q/Esc close", term.cols - 1)
     term.write(f"\x1b[{term.rows};1H{hint}"[:term.cols + 8])
     return top
 
@@ -117,7 +117,10 @@ def toc_loop(term, toc, page0):
                 sel = len(toc) - 1
             elif val == " ":
                 sel = _clamp_sel(toc, sel + n)
-            elif val in ("t", "q"):
+            elif val == "q":
+                # NB: 't' deliberately does NOT close the overlay: the key
+                # that opens a mode must not also close it, or holding it
+                # (key repeat) oscillates open/close forever.
                 return ("cancel", None)
             else:
                 count = ""

@@ -241,7 +241,10 @@ def _loop(reader, doc, term, path, progress):
                 reader.autocrop = not reader.autocrop
                 moved = True
             elif val == "t":
+                term.drain_typeahead()  # drop repeat backlog before entering
                 action, value = toc_loop(term, doc.toc, reader.page)
+                term.drain_typeahead()  # and on the way out, so a held key
+                                        # cannot oscillate the overlay
                 if action == "eof":
                     checkpoint()
                     return
