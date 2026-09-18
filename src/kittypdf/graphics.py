@@ -9,7 +9,6 @@ support probe (a=q always replies).
 import base64
 import select
 import time
-import zlib
 
 _APC_START = b"\x1b_G"
 _APC_END = b"\x1b\\"
@@ -25,8 +24,15 @@ def _apc(cmd, payload=b""):
 
 
 def probe(term, timeout=1.0):
-    """True if the terminal speaks the kitty graphics protocol."""
-    term.write_bytes(_apc({"a": "q", "s": 1, "v": 1, "i": 1}))
+    """True if the terminal speaks the kitty graphics protocol.
+
+    The query must carry a minimal valid payload — RGB 1x1 is 3 bytes —
+    because a=q runs the full load validation: an empty payload earns
+    ENODATA instead of OK.  a=q never stores the image (spec), so there is
+    no probe image to clean up afterwards.
+    """
+    term.write_bytes(_apc({"a": "q", "f": 24, "s": 1, "v": 1, "i": 1},
+                          b"AAAA"))
     resp = bytearray()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and not resp.endswith(_APC_END):
@@ -44,14 +50,19 @@ def probe(term, timeout=1.0):
 
 
 def send_image(term, image_id, png_bytes):
-    """Transmit a PNG (zlib+base64, chunked) under `image_id`, quietly."""
-    data = base64.standard_b64encode(zlib.compress(png_bytes, 6))
+    """Transmit a PNG (base64, chunked) under `image_id`, quietly.
+
+    The payload is not deflated again: PNG is already compressed, and
+    f=100 with o=z requires the S key per spec — without it the terminal
+    rejects the data.  Plain f=100 avoids both problems.
+    """
+    data = base64.standard_b64encode(png_bytes)
     first = True
     while data:
         chunk, data = data[:_CHUNK], data[_CHUNK:]
         cmd = {"q": 1, "m": 1 if data else 0}
         if first:
-            cmd.update({"a": "t", "i": image_id, "f": 100, "o": "z"})
+            cmd.update({"a": "t", "i": image_id, "f": 100})
             first = False
         term.write_bytes(_apc(cmd, chunk))
 
