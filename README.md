@@ -11,8 +11,10 @@ Written from scratch; inspired by the (dormant) `termpdf.py`.
 ```sh
 kittypdf book.pdf              # or the `pdf` alias
 kittypdf -p 20 book.pdf        # open at page 20 (1-based)
-kittypdf -m dual book.pdf      # start layout: auto | single | dual
-kittypdf -V                    # version
+kittypdf -m dual book.pdf       # start layout: auto | single | dual
+kittypdf --transparent book.pdf # show unpainted paper over kitty's background
+kittypdf --no-transparent book.pdf # explicitly restore opaque paper
+kittypdf -V                     # version
 ```
 
 ## Keys
@@ -45,6 +47,7 @@ has no horizontal motion, so nothing competes for it.
 | Key | Action |
 |---|---|
 | `i` | invert colors (dark reading) |
+| `a` | toggle transparent unpainted paper (alpha mode) |
 | `c` | toggle autocrop (trim page margins) |
 | `d` | cycle page layout: auto → single → dual |
 | `r` / `Ctrl-L` | redraw current page |
@@ -80,16 +83,29 @@ bar shows a range like `[3-4/120]`.
 
 ## Status bar
 
-`[3-4/120]-c d` reads as: pages 3–4 of 120, `-` invert is on, `c` autocrop is
-on. A trailing mode flag (`s` single / `d` dual) appears only when the layout
-was forced with `d` or `-m`; auto shows no flag.
+`[3-4/120]-cad` reads as: pages 3–4 of 120, `-` invert is on, `c` autocrop
+is on, and `a` transparent paper is on. A trailing mode flag (`s` single / `d`
+dual) appears only when the layout was forced with `d` or `-m`; auto shows no
+flag.
+
+## Transparent paper
+
+Press `a` or start with `--transparent` to let kitty's background show through
+parts of the PDF page that contain no painted content. This preserves text and
+images at full opacity. It deliberately does **not** remove white pixels:
+explicit white page backgrounds, white areas in figures, and full-page scans
+remain opaque. Use `i` as well when dark text needs inverting for a dark kitty
+background. Kitty's `background_opacity` controls how much of the desktop is
+visible behind the terminal.
 
 ## Progress memory
 
-The last-read page, invert and crop settings are remembered per file
-(`~/.cache/kittypdf/`). Autocrop probes each page for its content bounding
-box at low resolution; pages whose paper is darker than the threshold
-(dense scans) simply stay uncropped.
+The last-read page, invert, crop, and transparent-paper settings are remembered
+per file (`~/.cache/kittypdf/`). `--transparent` and `--no-transparent` choose
+the initial alpha setting; the final setting is remembered on exit. Autocrop
+probes each page for its content bounding box at low resolution; pages whose
+paper is darker than the
+threshold (dense scans) simply stay uncropped.
 
 ## Install
 

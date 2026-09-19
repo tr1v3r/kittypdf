@@ -29,10 +29,12 @@ class Document:
                 rect = content
         return max(rect.width, 1.0), max(rect.height, 1.0)
 
-    def render(self, page_no, max_w, max_h, invert=False, autocrop=False):
+    def render(self, page_no, max_w, max_h, invert=False, autocrop=False,
+               transparent=False):
         """Render 0-based `page_no` to fit (max_w, max_h) pixels.
 
-        Returns (png_bytes, width, height).
+        Returns (png_bytes, width, height). With transparent=True, unpainted
+        areas retain their alpha; explicit backgrounds and scans are not erased.
         """
         page = self.doc.load_page(page_no)
         rect = page.rect
@@ -44,7 +46,7 @@ class Document:
         zoom = min(zoom, (_MAX_PIXELS / (rect.width * rect.height)) ** 0.5)
         zoom = max(zoom, 0.01)
         pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom),
-                              alpha=False, clip=rect)
+                              alpha=transparent, clip=rect)
         if invert:
             pix = _inverted(pix)
         return pix.tobytes("png"), pix.width, pix.height
@@ -101,6 +103,17 @@ class Document:
 
 
 def _inverted(pix):
-    """Invert all channels via a translation table (C speed, no per-byte loop)."""
-    samples = bytearray(pix.samples).translate(bytes(range(255, -1, -1)))
-    return pymupdf.Pixmap(pix.colorspace, pix.width, pix.height, samples, False)
+    """Invert color while retaining premultiplied alpha.
+
+    MuPDF stores RGBA samples premultiplied (C <= A). The inverted premultiplied
+    color is therefore A - C, not 255 - C; changing alpha would make transparent
+    paper opaque and produce halos around anti-aliased text.
+    """
+    if not pix.alpha:
+        samples = bytearray(pix.samples).translate(bytes(range(255, -1, -1)))
+        return pymupdf.Pixmap(pix.colorspace, pix.width, pix.height,
+                              samples, False)
+
+    inverted = pymupdf.Pixmap(pix)
+    inverted.invert_irect()
+    return inverted
