@@ -45,7 +45,8 @@ class Progress:
         return os.path.join(self.dir, f"{key}.json")
 
     def load(self, path):
-        state = {"page": 0, "invert": False, "crop": False}
+        state = {"page": 0, "invert": False, "crop": False,
+                 "transparent": False}
         if not self.dir:
             return state
         try:
@@ -57,14 +58,16 @@ class Progress:
             state["page"] = int(saved.get("page", 0))
             state["invert"] = bool(saved.get("invert", False))
             state["crop"] = bool(saved.get("crop", False))
+            state["transparent"] = bool(saved.get("transparent", False))
         return state
 
-    def save(self, path, page, invert=False, crop=False):
+    def save(self, path, page, invert=False, crop=False, transparent=False):
         if not self.dir:
             return
         try:
             with open(self._file(path), "w") as fh:
-                json.dump({"page": page, "invert": invert, "crop": crop}, fh)
+                json.dump({"page": page, "invert": invert, "crop": crop,
+                           "transparent": transparent}, fh)
         except OSError:
             pass
 
@@ -78,6 +81,7 @@ class Reader:
         self.page = 0
         self.invert = False
         self.autocrop = False
+        self.transparent = False
         self.mode = "auto"       # auto | single | dual
         self._sent = None        # signature of what is currently on screen
         self._spread = False     # whether the last draw was a two-page spread
@@ -140,12 +144,14 @@ class Reader:
 
     def _draw_single(self, avail_w, avail_h):
         t = self.term
-        sig = ("single", self.page, self.invert, self.autocrop, avail_w, avail_h)
+        sig = ("single", self.page, self.invert, self.autocrop,
+               self.transparent, avail_w, avail_h)
         if sig != self._sent:
             try:
                 png, w, h = self.doc.render(self.page, avail_w, avail_h,
                                             invert=self.invert,
-                                            autocrop=self.autocrop)
+                                            autocrop=self.autocrop,
+                                            transparent=self.transparent)
             except Exception as exc:  # noqa: BLE001 - report and stay alive
                 self.status(msg=f"render error: {exc}")
                 return
@@ -162,7 +168,8 @@ class Reader:
     def _draw_spread(self, avail_w, avail_h):
         t = self.term
         left, right = self._pair()
-        sig = ("dual", left, right, self.invert, self.autocrop, avail_w, avail_h)
+        sig = ("dual", left, right, self.invert, self.autocrop,
+               self.transparent, avail_w, avail_h)
         gutter = _GUTTER_CELLS * t.cell_w
         half = (avail_w - gutter) / 2
         if sig != self._sent:
@@ -174,7 +181,8 @@ class Reader:
                         continue
                     png, w, h = self.doc.render(pno, half, avail_h,
                                                 invert=self.invert,
-                                                autocrop=self.autocrop)
+                                                autocrop=self.autocrop,
+                                                transparent=self.transparent)
                     imgs.append((png, w, h))
             except Exception as exc:  # noqa: BLE001
                 self.status(msg=f"render error: {exc}")
@@ -205,7 +213,9 @@ class Reader:
     def status(self, count="", msg=""):
         t = self.term
         left = msg or (count if count else "kittypdf")
-        flags = ("-" if self.invert else "") + ("c" if self.autocrop else "")
+        flags = (("-" if self.invert else "")
+                 + ("c" if self.autocrop else "")
+                 + ("a" if self.transparent else ""))
         if self.mode != "auto":
             flags += self.mode[0]            # 's' or 'd' when forced
         if self._spread:
@@ -251,6 +261,13 @@ def main(argv=None):
                         help="open at this page (1-based)")
     parser.add_argument("-m", "--mode", choices=_MODES, default="auto",
                         help="page layout: auto (default), single, or dual")
+    transparency = parser.add_mutually_exclusive_group()
+    transparency.add_argument("--transparent", dest="transparent",
+                              action="store_true", default=None,
+                              help="keep unpainted PDF paper transparent")
+    transparency.add_argument("--no-transparent", dest="transparent",
+                              action="store_false",
+                              help="force an opaque PDF paper background")
     parser.add_argument("-V", "--version", action="version",
                         version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
@@ -284,6 +301,8 @@ def main(argv=None):
         reader = Reader(doc, term)
         reader.invert = state["invert"]
         reader.autocrop = state["crop"]
+        reader.transparent = (state["transparent"] if args.transparent is None
+                              else args.transparent)
         reader.mode = args.mode
         start = state["page"]
         if args.page is not None:
@@ -308,7 +327,8 @@ def _loop(reader, doc, term, path, progress):
     reader.status()
 
     def checkpoint():
-        progress.save(path, reader.page, reader.invert, reader.autocrop)
+        progress.save(path, reader.page, reader.invert, reader.autocrop,
+                      reader.transparent)
 
     while True:
         if term.take_resize():
@@ -347,6 +367,9 @@ def _loop(reader, doc, term, path, progress):
                 reader.goto(doc.page_count - 1, n if count else None)
             elif val == "i":
                 reader.invert = not reader.invert
+                moved = True
+            elif val == "a":
+                reader.transparent = not reader.transparent
                 moved = True
             elif val == "c":
                 reader.autocrop = not reader.autocrop
