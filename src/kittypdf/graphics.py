@@ -68,9 +68,10 @@ def send_image(term, image_id, png_bytes):
 
 
 def place(term, image_id, row, col):
-    """Place image `image_id` with its top-left corner at (row, col), 1-based."""
+    """Place an image without moving the text cursor or scrolling the screen."""
     term.write(f"\x1b[{row};{col}H")
-    term.write_bytes(_apc({"a": "p", "i": image_id, "z": -1, "q": 1}))
+    term.write_bytes(_apc({"a": "p", "i": image_id, "z": -1, "C": 1,
+                           "q": 1}))
 
 
 def delete_image(term, image_id):

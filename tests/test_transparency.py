@@ -166,6 +166,25 @@ class GraphicsTests(unittest.TestCase):
         self.assertIn(b"f=100", raw)
         self.assertNotIn(b"o=z", raw)
 
+    def test_place_does_not_move_cursor_or_scroll_footer(self):
+        class Sink:
+            def __init__(self):
+                self.text = []
+                self.data = bytearray()
+
+            def write(self, value):
+                self.text.append(value)
+
+            def write_bytes(self, data):
+                self.data.extend(data)
+
+        sink = Sink()
+        graphics.place(sink, 9, 3, 4)
+
+        self.assertEqual(sink.text, ["\x1b[3;4H"])
+        self.assertEqual(bytes(sink.data),
+                         b"\x1b_Ga=p,i=9,z=-1,C=1,q=1\x1b\\")
+
 
 class FakeTerm:
     xpixel = 800
