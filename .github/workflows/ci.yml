@@ -45,7 +45,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   coverage:
-    name: Coverage gate (>= 50%)
+    name: Coverage gate (>= 75%)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +56,7 @@ jobs:
         run: pip install -e . coverage
       - name: Run tests under coverage
         run: coverage run -m unittest discover -s tests
-      - name: Coverage report (fails below 50%)
+      - name: Coverage report (fails below 75%)
         run: coverage report
 
   build:

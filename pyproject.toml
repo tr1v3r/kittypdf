@@ -44,6 +44,6 @@ source = ["src/kittypdf"]
 
 [tool.coverage.report]
 show_missing = true
-# term.py/toc.py are TTY-interactive and hard to unit-test; keep the floor
-# slightly below the current total so coverage only gates regressions.
-fail_under = 50
+# term.py raw-mode/termios setup is exercised by the real-kitty smoke test,
+# not unit tests; the floor guards regressions in the logic-heavy modules.
+fail_under = 75
