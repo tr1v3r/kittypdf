@@ -9,7 +9,7 @@ import sys
 from . import __version__, graphics
 from .render import Document
 from .term import Terminal
-from .toc import toc_loop
+from .toc import _dw, _fit, toc_loop
 
 _IMAGE_ID = 1
 _IMAGE_ID_R = 2          # right page in dual-page (spread) mode
@@ -258,8 +258,12 @@ class Reader:
         else:
             pages = f"{self.page + 1}"
         right = f"[{pages}/{self.doc.page_count}]{flags}"
-        pad = max(1, t.cols - len(left) - len(right) - 2)
-        t.write(f"\x1b[{t.rows};1H\x1b[2K {left}{' ' * pad}{right} ")
+        # Truncate the message by display width (CJK counts as 2 cells) so a
+        # long error can never wrap onto a second line and scroll the screen.
+        budget = t.cols - _dw(right) - 3
+        shown = _fit(left, max(1, budget))
+        pad = max(1, t.cols - _dw(shown) - _dw(right) - 2)
+        t.write(f"\x1b[{t.rows};1H\x1b[2K {shown}{' ' * pad}{right} ")
 
     # -- navigation -----------------------------------------------------
 
@@ -321,36 +325,44 @@ def main(argv=None):
     state = progress.load(args.file)
 
     term = Terminal()
-    term.enter()
+    error = None
     try:
+        # enter() inside the try: even a crash partway through setup must
+        # restore the terminal in the finally below (TERM-3).
+        term.enter()
         if not graphics.probe(term):
-            print("kittypdf: terminal does not support the kitty graphics "
-                  "protocol", file=sys.stderr)
-            return 2
-        if not term.has_pixel_size:
-            print("kittypdf: terminal does not report pixel cell sizes "
-                  "(kitty does)", file=sys.stderr)
-            return 2
-
-
-        reader = Reader(doc, term)
-        reader.invert = state["invert"]
-        reader.autocrop = state["crop"]
-        reader.transparent = (state["transparent"] if args.transparent is None
-                              else args.transparent)
-        reader.mode = args.mode
-        start = state["page"]
-        if args.page is not None:
-            start = args.page - 1
-        reader.page = reader.clamp(start)
-        _loop(reader, doc, term, args.file, progress)
-        return 0
+            error = 2, ("terminal does not support the kitty graphics "
+                        "protocol")
+        elif not term.has_pixel_size:
+            error = 2, ("terminal does not report pixel cell sizes "
+                        "(kitty does)")
+        else:
+            reader = Reader(doc, term)
+            reader.invert = state["invert"]
+            reader.autocrop = state["crop"]
+            reader.transparent = (state["transparent"]
+                                  if args.transparent is None
+                                  else args.transparent)
+            reader.mode = args.mode
+            start = state["page"]
+            if args.page is not None:
+                start = args.page - 1
+            reader.page = reader.clamp(start)
+            _loop(reader, doc, term, args.file, progress)
+            return 0
     finally:
         try:
             graphics.delete_all(term)
         except Exception:
             pass
         term.exit()
+    # Report setup failures only after the alternate screen was popped and
+    # cooked mode restored, so the message lands on the real screen instead
+    # of being wiped with the buffer (GFX-5/APP-1).
+    if error:
+        code, msg = error
+        print(f"kittypdf: {msg}", file=sys.stderr)
+        return code
 
 
 def _loop(reader, doc, term, path, progress):
