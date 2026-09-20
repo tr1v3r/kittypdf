@@ -2,6 +2,8 @@ import base64
 import json
 import os
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import zlib
@@ -318,6 +320,38 @@ class CliTests(unittest.TestCase):
     def test_no_transparent_overrides_transparent_cache(self):
         self.assertFalse(self._run("--no-transparent", True))
 
+    def test_corrupt_progress_cache_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                os.environ, {"XDG_CACHE_HOME": tmp}):
+            progress = Progress()
+            path = "/tmp/book.pdf"
+            with open(progress._file(path), "w") as fh:
+                fh.write("{not json!!")
+            self.assertEqual(progress.load(path), {
+                "page": 0, "invert": False, "crop": False,
+                "transparent": False,
+            })
+            with open(progress._file(path), "w") as fh:
+                json.dump({"page": "seventeen"}, fh)
+            self.assertEqual(progress.load(path)["page"], 0)
+            with open(progress._file(path), "w") as fh:
+                json.dump({"page": None}, fh)
+            self.assertEqual(progress.load(path)["page"], 0)
+
+    def test_progress_cache_evicts_oldest_entries(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+                os.environ, {"XDG_CACHE_HOME": tmp}):
+            progress = Progress()
+            first = "/tmp/old-book.pdf"
+            progress.save(first, 1)
+            old_file = progress._file(first)
+            os.utime(old_file, (0, 0))  # make it clearly the oldest
+            for i in range(app._MAX_CACHE_ENTRIES):
+                progress.save(f"/tmp/book-{i}.pdf", 1)
+            self.assertFalse(os.path.exists(old_file))
+            self.assertTrue(
+                os.path.exists(progress._file("/tmp/book-0.pdf")))
+
     @mock.patch("kittypdf.app.graphics.place")
     @mock.patch("kittypdf.app.graphics.send_image")
     @mock.patch("kittypdf.app.graphics.delete_image")
@@ -338,6 +372,18 @@ class CliTests(unittest.TestCase):
                 mock.patch("kittypdf.app.graphics.probe", return_value=True):
             self.assertEqual(app.main(["--no-transparent", "book.pdf"]), 0)
         self.assertFalse(progress.save.call_args.args[-1])
+
+
+class MainModuleTests(unittest.TestCase):
+    def test_python_m_exits_1_on_missing_file(self):
+        env = dict(os.environ)
+        srcdir = os.path.join(os.path.dirname(__file__), "..", "src")
+        env["PYTHONPATH"] = (srcdir + os.pathsep + env.get("PYTHONPATH", ""))
+        proc = subprocess.run(
+            [sys.executable, "-m", "kittypdf", "/nonexistent/book.pdf"],
+            capture_output=True, env=env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(b"no such file", proc.stderr)
 
 
 if __name__ == "__main__":
