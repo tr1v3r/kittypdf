@@ -1,9 +1,9 @@
 """Kitty graphics protocol, minimal and quiet.
 
-Every fire-and-forget command carries q=1 ("do not reply"), so the terminal
-never emits asynchronous ACKs that could pollute the key stream, and we never
-block waiting for a response. The only response we read is the one-time
-support probe (a=q always replies).
+Every fire-and-forget command carries q=2 ("do not reply, even on error"),
+so the terminal never emits asynchronous ACKs or error responses that could
+pollute the key stream, and we never block waiting for a reply. The only
+response we read is the one-time support probe (a=q always replies).
 """
 
 import base64
@@ -36,9 +36,15 @@ def probe(term, timeout=1.0):
     resp = bytearray()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and not resp.endswith(_APC_END):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0 or not select.select([term.fd], [], [], remaining)[0]:
-            break
+        # Drain any pushbacked bytes before selecting on the fd: data that
+        # already sits in the userspace buffer never makes the fd readable,
+        # so without this the probe would sleep out its whole timeout (and
+        # keys typed during the probe window would linger in the buffer).
+        if not term.pending():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([term.fd], [], [],
+                                                   remaining)[0]:
+                break
         try:
             chunk = term.read_raw()
         except OSError:
@@ -60,7 +66,7 @@ def send_image(term, image_id, png_bytes):
     first = True
     while data:
         chunk, data = data[:_CHUNK], data[_CHUNK:]
-        cmd = {"q": 1, "m": 1 if data else 0}
+        cmd = {"q": 2, "m": 1 if data else 0}
         if first:
             cmd.update({"a": "t", "i": image_id, "f": 100})
             first = False
@@ -71,12 +77,12 @@ def place(term, image_id, row, col):
     """Place an image without moving the text cursor or scrolling the screen."""
     term.write(f"\x1b[{row};{col}H")
     term.write_bytes(_apc({"a": "p", "i": image_id, "z": -1, "C": 1,
-                           "q": 1}))
+                           "q": 2}))
 
 
 def delete_image(term, image_id):
-    term.write_bytes(_apc({"a": "d", "i": image_id, "q": 1}))
+    term.write_bytes(_apc({"a": "d", "i": image_id, "q": 2}))
 
 
 def delete_all(term):
-    term.write_bytes(_apc({"a": "d", "d": "a", "q": 1}))
+    term.write_bytes(_apc({"a": "d", "d": "a", "q": 2}))

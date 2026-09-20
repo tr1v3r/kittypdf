@@ -128,6 +128,10 @@ class Terminal:
             return data
         return os.read(self.fd, size)
 
+    def pending(self):
+        """True if the pushback buffer holds undecoded bytes."""
+        return bool(self._buf)
+
     def drain_typeahead(self):
         """Drop queued input (pushback buffer + kernel tty queue).
 
@@ -244,6 +248,12 @@ class Terminal:
             return ("char", ch)
         if len(buf) < 2:
             return None
+        if buf[1] == 0x5F:  # APC ... ST: swallow silently (e.g. gfx replies)
+            for i in range(2, len(buf) - 1):
+                if buf[i] == _ESC and buf[i + 1] == 0x5C:  # ST (ESC \)
+                    self._buf = buf[i + 2:]
+                    return self._decode()
+            return None  # incomplete APC: wait for the terminator
         if buf[1] in (0x5B, 0x4F):  # CSI or SS3
             for i in range(2, len(buf)):
                 if 0x40 <= buf[i] <= 0x7E:  # final byte

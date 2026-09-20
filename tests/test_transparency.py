@@ -185,7 +185,7 @@ class GraphicsTests(unittest.TestCase):
 
         self.assertEqual(sink.text, ["\x1b[3;4H"])
         self.assertEqual(bytes(sink.data),
-                         b"\x1b_Ga=p,i=9,z=-1,C=1,q=1\x1b\\")
+                         b"\x1b_Ga=p,i=9,z=-1,C=1,q=2\x1b\\")
 
 
 class FakeTerm:
@@ -436,6 +436,83 @@ class TocHintTests(unittest.TestCase):
         # no lone trailing combining half of a wide char: width parity matches
         for ch in hint:
             self.assertIn(app._dw(ch), (1, 2))
+
+
+class GfxQuietTests(unittest.TestCase):
+    class Term:
+        def __init__(self):
+            self.fd = 0
+            self.written = []
+
+        def write(self, text):
+            self.written.append(text.encode())
+
+        def write_bytes(self, data):
+            self.written.append(data)
+
+        def pending(self):
+            return False
+
+    def test_fire_and_forget_commands_use_q2(self):
+        term = self.Term()
+        graphics.send_image(term, 7, b"\x89PNGfake")
+        graphics.place(term, 7, 1, 1)
+        graphics.delete_image(term, 7)
+        graphics.delete_all(term)
+        blob = b"".join(term.written)
+        self.assertNotIn(b"q=1", blob)
+        self.assertGreaterEqual(blob.count(b"q=2"), 4)
+        # the support probe still expects a reply (no quiet flag in a=q)
+        term2 = self.Term()
+        with mock.patch("kittypdf.graphics.select.select",
+                        return_value=[[], [], []]):
+            graphics.probe(term2)
+        self.assertNotIn(b"q=2", b"".join(term2.written))
+
+    def test_probe_drains_pushback_before_selecting(self):
+        term = self.Term()
+        term.fd = -1  # would explode if select() were called on it
+        chunks = [b"jj\x1b_G;i=32;OK\x1b\\"]  # user keys + probe response
+        calls = {"select": 0, "read_raw": 0}
+
+        def fake_select(*_args):
+            calls["select"] += 1
+            return [[], [], []]
+
+        def fake_read_raw(_size=4096):
+            calls["read_raw"] += 1
+            return chunks.pop(0) if chunks else b""
+
+        term.pending = lambda: bool(chunks)
+        term.read_raw = fake_read_raw
+        with mock.patch("kittypdf.graphics.select.select",
+                        side_effect=fake_select):
+            self.assertTrue(graphics.probe(term))
+        self.assertEqual(calls["select"], 0)   # pushback served first
+        self.assertEqual(calls["read_raw"], 1)
+
+    def test_apc_sequences_are_swallowed_not_decoded_as_keys(self):
+        from kittypdf.term import Terminal
+        term = Terminal.__new__(Terminal)  # no tty needed for decoding
+        term._buf = (b"\x1b_Gq=2 payload bytes here\x1b\\"
+                     b"\x1b_G;i=1;OK\x1b\\x")
+        term._eof = False
+        term.fd = -1
+        self.assertEqual(term.read_key(timeout=0.05), ("char", "x"))
+        self.assertEqual(term._buf, b"")
+
+    def test_partial_apc_does_not_emit_phantom_key(self):
+        from kittypdf.term import Terminal
+        term = Terminal.__new__(Terminal)
+        term._buf = b"\x1b_Gtruncated-without-st"
+        term._eof = False
+        term.fd = -1
+        with mock.patch("kittypdf.term.select.select",
+                        return_value=[[], [], []]):
+            # incomplete APC must fall back to a lone-Escape event, never a
+            # phantom 'G'/'_' char from the APC introducer
+            event = term.read_key(timeout=0.05)
+        self.assertIn(event, [("esc", ""), None])
 
 
 class MainModuleTests(unittest.TestCase):
