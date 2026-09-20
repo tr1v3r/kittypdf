@@ -15,6 +15,12 @@ class Document:
     def __init__(self, path):
         self.path = path
         self.doc = pymupdf.open(path)
+        if self.doc.needs_pass:
+            # Owner-password-only PDFs encrypt permissions but leave the
+            # content readable; the empty user password unlocks them. A
+            # real user password will fail here and surface as a regular
+            # "cannot open" error upstream.
+            self.doc.authenticate("")
         self.page_count = self.doc.page_count
         self.toc = self.doc.get_toc()  # [[level, title, page_1based], ...]
         self._crop_cache = {}

@@ -23,6 +23,44 @@ def _apc(cmd, payload=b""):
     return out + _APC_END
 
 
+def _parse_probe_response(resp):
+    """Strictly validate an a=q reply (GFX-6).
+
+    Scan the buffer for complete APC frames (ESC _ G <fields> ESC \\) and
+    accept only a well-formed one: semicolon-separated fields that are
+    either KEY=VALUE pairs or the final OK/ERR status token, ending in OK.
+    Bytes outside frames (e.g. keys typed during the probe window) are
+    ignored — but a bare substring match would have accepted garbage that
+    merely contains the bytes "OK", or a truncated frame.
+    """
+    data = bytes(resp)
+    pos = 0
+    found_frame = False
+    while True:
+        start = data.find(_APC_START, pos)
+        if start < 0:
+            return False
+        end = data.find(_APC_END, start + len(_APC_START))
+        if end < 0:
+            return False
+        pos = end + len(_APC_END)
+        found_frame = True
+        body = data[start + len(_APC_START):end]
+        if not body:
+            continue
+        fields = body.split(b";")
+        status = fields[-1]
+        if status not in (b"OK", b"ERR"):
+            continue
+        well_formed = all(
+            field == b""  # empty control-key section before the ';'
+            or (b"=" in field and field.partition(b"=")[0]
+                and field.partition(b"=")[2])
+            for field in fields[:-1])
+        if well_formed and status == b"OK":
+            return True
+
+
 def probe(term, timeout=1.0):
     """True if the terminal speaks the kitty graphics protocol.
 
@@ -52,7 +90,7 @@ def probe(term, timeout=1.0):
         if not chunk:
             break
         resp += chunk
-    return b"OK" in bytes(resp)
+    return _parse_probe_response(resp)
 
 
 def send_image(term, image_id, png_bytes):
@@ -81,7 +119,14 @@ def place(term, image_id, row, col):
 
 
 def delete_image(term, image_id):
-    term.write_bytes(_apc({"a": "d", "i": image_id, "q": 2}))
+    """Delete one image entirely (d=i frees data + placements).
+
+    kitty's plain a=d,i=<id> only removes the image's visible placements
+    while keeping the transmitted bitmap in memory; d=i additionally frees
+    the stored data, which is what page-turn invalidation wants (the id is
+    re-transmitted for the next draw anyway).
+    """
+    term.write_bytes(_apc({"a": "d", "d": "i", "i": image_id, "q": 2}))
 
 
 def delete_all(term):

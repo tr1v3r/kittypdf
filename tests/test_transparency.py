@@ -515,6 +515,53 @@ class GfxQuietTests(unittest.TestCase):
         self.assertIn(event, [("esc", ""), None])
 
 
+class GfxDeleteAndProbeTests(unittest.TestCase):
+    class Term:
+        def __init__(self):
+            self.written = []
+
+        def write_bytes(self, data):
+            self.written.append(data)
+
+    def test_delete_image_uses_d_i(self):
+        term = self.Term()
+        graphics.delete_image(term, 7)
+        self.assertEqual(term.written, [b"\x1b_Ga=d,d=i,i=7,q=2\x1b\\"])
+
+    def test_probe_response_parsing_is_strict(self):
+        parse = graphics._parse_probe_response
+        # well-formed kitty reply, with keys typed around it
+        self.assertTrue(parse(b"jj\x1b_G;i=1;OK\x1b\\k"))
+        self.assertTrue(parse(b"\x1b_Gf=24,s=1,v=1,i=1;OK\x1b\\"))
+        # substring match no longer suffices
+        self.assertFalse(parse(b"garbage with OK inside"))
+        self.assertFalse(parse(b"\x1b_G;i=1;NOTOK\x1b\\"))
+        self.assertFalse(parse(b"\x1b_G;i=1;OK"))         # no ST terminator
+        self.assertFalse(parse(b""))                       # nothing at all
+        # error replies are failures even when well-formed
+        self.assertFalse(parse(b"\x1b_G;i=1;ERR\x1b\\"))
+        self.assertFalse(parse(b"\x1b_G;i=1;ERR:ENODATA\x1b\\"))
+        # malformed control fields reject the frame
+        self.assertFalse(parse(b"\x1b_Gjunk;OK\x1b\\"))
+
+
+class OwnerPasswordTests(unittest.TestCase):
+    def test_owner_password_pdf_opens_and_renders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "owner-only.pdf")
+            src = pymupdf.open()
+            page = src.new_page(width=100, height=100)
+            page.insert_text((35, 55), "text")
+            src.save(path, encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                     owner_pw="owner-secret", user_pw="",
+                     permissions=pymupdf.PDF_PERM_PRINT)
+            src.close()
+            doc = Document(path)  # must not raise
+            self.assertEqual(doc.page_count, 1)
+            png, w, h = doc.render(0, 100, 100)
+            self.assertGreater(w, 0)
+
+
 class MainModuleTests(unittest.TestCase):
     def test_python_m_exits_1_on_missing_file(self):
         env = dict(os.environ)
