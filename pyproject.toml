@@ -16,3 +16,34 @@ kittypdf = "kittypdf.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kittypdf"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "SIM105", # try/except/pass cleanup paths are intentional in terminal teardown
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["SIM115"] # test temp files don't need context managers
+
+[tool.coverage.run]
+source = ["src/kittypdf"]
+
+[tool.coverage.report]
+show_missing = true
+# term.py/toc.py are TTY-interactive and hard to unit-test; keep the floor
+# slightly below the current total so coverage only gates regressions.
+fail_under = 50

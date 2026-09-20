@@ -164,7 +164,6 @@ class Reader:
         self.term.write("\x1b[2J")
 
     def draw(self):
-        t = self.term
         avail_w, avail_h = self._viewport()
         spread = self._want_spread(avail_w, avail_h)
         self._spread = spread
@@ -251,10 +250,7 @@ class Reader:
             flags += self.mode[0]            # 's' or 'd' when forced
         if self._spread:
             lp, rp = self._pair()
-            if rp is not None:
-                pages = f"{lp + 1}-{rp + 1}"
-            else:
-                pages = f"{lp + 1}"
+            pages = f"{lp + 1}-{rp + 1}" if rp is not None else f"{lp + 1}"
         else:
             pages = f"{self.page + 1}"
         right = f"[{pages}/{self.doc.page_count}]{flags}"
@@ -394,7 +390,6 @@ def _loop(reader, doc, term, path, progress):
             continue  # unknown sequences never touch the count buffer
 
         n = int(count) if count else 1
-        moved = False
 
         if kind == "char":
             if val.isdigit():
@@ -414,17 +409,13 @@ def _loop(reader, doc, term, path, progress):
                 reader.goto(doc.page_count - 1, n if count else None)
             elif val == "i":
                 reader.invert = not reader.invert
-                moved = True
             elif val == "a":
                 reader.transparent = not reader.transparent
-                moved = True
             elif val == "c":
                 reader.autocrop = not reader.autocrop
-                moved = True
             elif val == "d":
                 reader.cycle_mode()
                 reader.invalidate()   # layout change: wipe and re-lay-out
-                moved = True
             elif val == "t":
                 term.drain_typeahead()  # drop repeat backlog before entering
                 action, value = toc_loop(term, doc.toc, reader.page)
@@ -442,10 +433,8 @@ def _loop(reader, doc, term, path, progress):
                 # cancel (q/Esc) looked stuck on the ToC while Enter, which
                 # changes the page and re-transmits, worked.
                 reader.invalidate()
-                moved = True
             elif val in ("r", "R"):
                 reader.invalidate()
-                moved = True
             elif val in ("q", "Q"):
                 checkpoint()
                 return
@@ -473,7 +462,6 @@ def _loop(reader, doc, term, path, progress):
                 checkpoint()
                 return
             reader.invalidate()
-            moved = True
         else:
             count = ""
             pending_g = False

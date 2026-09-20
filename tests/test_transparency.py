@@ -558,7 +558,7 @@ class OwnerPasswordTests(unittest.TestCase):
             src.close()
             doc = Document(path)  # must not raise
             self.assertEqual(doc.page_count, 1)
-            png, w, h = doc.render(0, 100, 100)
+            _png, w, _h = doc.render(0, 100, 100)
             self.assertGreater(w, 0)
 
 

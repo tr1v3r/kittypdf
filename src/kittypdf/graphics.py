@@ -35,7 +35,6 @@ def _parse_probe_response(resp):
     """
     data = bytes(resp)
     pos = 0
-    found_frame = False
     while True:
         start = data.find(_APC_START, pos)
         if start < 0:
@@ -44,7 +43,6 @@ def _parse_probe_response(resp):
         if end < 0:
             return False
         pos = end + len(_APC_END)
-        found_frame = True
         body = data[start + len(_APC_START):end]
         if not body:
             continue
