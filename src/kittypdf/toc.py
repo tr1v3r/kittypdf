@@ -75,7 +75,9 @@ def _draw(term, toc, sel, top):
         else:
             term.write(f"\x1b[{i - top + 2};1H{line}")
     hint = _fit(" e/u move · Enter jump · q/Esc close", term.cols - 1)
-    term.write(f"\x1b[{term.rows};1H{hint}"[:term.cols + 8])
+    # _fit already bounded the hint to the line width by display cells, so
+    # writing it as-is can never cut a double-width glyph in half.
+    term.write(f"\x1b[{term.rows};1H{hint}")
     return top
 
 

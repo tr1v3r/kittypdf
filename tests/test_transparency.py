@@ -374,6 +374,70 @@ class CliTests(unittest.TestCase):
         self.assertFalse(progress.save.call_args.args[-1])
 
 
+class TermDisplayTests(unittest.TestCase):
+    def _status_line(self, reader):
+        last = reader.term.output[-1]
+        visible = last.replace(f"\x1b[{reader.term.rows};1H", "")
+        visible = visible.replace("\x1b[2K", "")
+        return visible
+
+    def test_status_truncates_long_message_to_screen_width(self):
+        reader = Reader(FakeDoc(), FakeTerm())
+        reader.status(msg="错" * 100)  # 200 display cells on an 80-col term
+        line = self._status_line(reader)
+        self.assertEqual(app._dw(line), reader.term.cols)
+        self.assertLess(app._dw(line), 200)
+
+    def test_status_keeps_short_message_intact(self):
+        reader = Reader(FakeDoc(), FakeTerm())
+        reader.status(msg="hello")
+        self.assertIn("hello", self._status_line(reader))
+
+    def test_setup_failure_prints_after_terminal_restore(self):
+        order = []
+
+        class OrderTerm(FakeTerm):
+            def exit(self):
+                order.append("exit")
+
+        class OrderStderr:
+            def write(self, text):
+                if text.strip():
+                    order.append(("print", text))
+                return len(text)
+
+            def flush(self):
+                pass
+
+        term = OrderTerm()
+        with mock.patch("kittypdf.app.os.path.isfile", return_value=True), \
+                mock.patch("kittypdf.app.Document",
+                           return_value=FakeDoc()), \
+                mock.patch("kittypdf.app.Terminal", return_value=term), \
+                mock.patch("kittypdf.app.graphics.probe",
+                           return_value=False), \
+                mock.patch("kittypdf.app.graphics.delete_all"), \
+                mock.patch("sys.stderr", new=OrderStderr()):
+            self.assertEqual(app.main(["book.pdf"]), 2)
+        self.assertEqual(order[0], "exit")
+        printed = "".join(item[1] for item in order if item != "exit")
+        self.assertIn("kitty graphics", printed)
+
+
+class TocHintTests(unittest.TestCase):
+    def test_toc_hint_never_exceeds_screen_or_cuts_cjk(self):
+        term = FakeTerm()
+        term.cols = 20  # narrower than the hint line
+        toc = [(1, "章", 1)]
+        import kittypdf.toc as toc_mod
+        toc_mod._draw(term, toc, 0, 0)
+        hint = term.output[-1].replace(f"\x1b[{term.rows};1H", "")
+        self.assertLessEqual(app._dw(hint), term.cols)
+        # no lone trailing combining half of a wide char: width parity matches
+        for ch in hint:
+            self.assertIn(app._dw(ch), (1, 2))
+
+
 class MainModuleTests(unittest.TestCase):
     def test_python_m_exits_1_on_missing_file(self):
         env = dict(os.environ)
