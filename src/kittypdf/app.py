@@ -16,6 +16,10 @@ _IMAGE_ID_R = 2          # right page in dual-page (spread) mode
 _GUTTER_CELLS = 1        # blank columns between the two pages of a spread
 _MODES = ("auto", "single", "dual")
 
+# Progress-cache eviction: keep at most this many state files, deleting the
+# least recently modified ones first (a simple size-capped LRU).
+_MAX_CACHE_ENTRIES = 128
+
 # Colemak-flavoured bindings: e/u move down/up (the vertical half of the
 # colemak movement diamond), E/U are its big-jump variants.  j/k/b remain as
 # qwerty aliases — terminals deliver layout-translated bytes, so they cannot
@@ -45,6 +49,7 @@ class Progress:
         return os.path.join(self.dir, f"{key}.json")
 
     def load(self, path):
+        """Load saved reader state; never raises on corrupt caches."""
         state = {"page": 0, "invert": False, "crop": False,
                  "transparent": False}
         if not self.dir:
@@ -55,7 +60,11 @@ class Progress:
         except (OSError, ValueError):
             return state
         if isinstance(saved, dict):
-            state["page"] = int(saved.get("page", 0))
+            try:
+                page = int(saved.get("page", 0))
+            except (TypeError, ValueError):
+                page = 0
+            state["page"] = max(page, 0)
             state["invert"] = bool(saved.get("invert", False))
             state["crop"] = bool(saved.get("crop", False))
             state["transparent"] = bool(saved.get("transparent", False))
@@ -68,6 +77,28 @@ class Progress:
             with open(self._file(path), "w") as fh:
                 json.dump({"page": page, "invert": invert, "crop": crop,
                            "transparent": transparent}, fh)
+        except OSError:
+            pass
+        self._evict()
+
+    def _evict(self):
+        """Keep the cache bounded: delete least-recently-modified entries."""
+        try:
+            entries = []
+            for name in os.listdir(self.dir):
+                if not name.endswith(".json"):
+                    continue
+                full = os.path.join(self.dir, name)
+                try:
+                    entries.append((os.path.getmtime(full), full))
+                except OSError:
+                    continue
+            excess = len(entries) - _MAX_CACHE_ENTRIES
+            for _, full in sorted(entries)[:max(excess, 0)]:
+                try:
+                    os.unlink(full)
+                except OSError:
+                    pass
         except OSError:
             pass
 
@@ -284,6 +315,11 @@ def main(argv=None):
         print(f"kittypdf: {args.file} has no pages", file=sys.stderr)
         return 1
 
+    # Read the cached state before entering raw mode so a corrupt cache can
+    # never leave the terminal stuck halfway through setup.
+    progress = Progress()
+    state = progress.load(args.file)
+
     term = Terminal()
     term.enter()
     try:
@@ -296,8 +332,7 @@ def main(argv=None):
                   "(kitty does)", file=sys.stderr)
             return 2
 
-        progress = Progress()
-        state = progress.load(args.file)
+
         reader = Reader(doc, term)
         reader.invert = state["invert"]
         reader.autocrop = state["crop"]
