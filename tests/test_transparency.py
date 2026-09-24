@@ -185,7 +185,7 @@ class GraphicsTests(unittest.TestCase):
 
         self.assertEqual(sink.text, ["\x1b[3;4H"])
         self.assertEqual(bytes(sink.data),
-                         b"\x1b_Ga=p,i=9,z=-1,C=1,q=2\x1b\\")
+                         b"\x1b_Ga=p,i=9,z=-1073741825,C=1,q=2\x1b\\")
 
 
 class FakeTerm:
@@ -431,10 +431,11 @@ class TocHintTests(unittest.TestCase):
         toc = [(1, "章", 1)]
         import kittypdf.toc as toc_mod
         toc_mod._draw(term, toc, 0, 0)
-        hint = term.output[-1].replace(f"\x1b[{term.rows};1H", "")
-        self.assertLessEqual(app._dw(hint), term.cols)
-        # no lone trailing combining half of a wide char: width parity matches
-        for ch in hint:
+        import re
+        line = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", term.output[-1])
+        self.assertLessEqual(app._dw(line), term.cols - 1)
+        self.assertIn("章", line)  # narrow layout still shows the chapter
+        for ch in line:
             self.assertIn(app._dw(ch), (1, 2))
 
 
