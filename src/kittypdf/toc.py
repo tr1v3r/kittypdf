@@ -1,12 +1,13 @@
-"""Table-of-contents overlay: list chapters, move, jump.
+"""A floating table-of-contents panel over the current PDF page.
 
-The overlay is plain text on an otherwise cleared screen; the page image
-stays transmitted in terminal memory, so closing the overlay only needs a
-re-place, not a re-render (the caller invalidates anyway for simplicity).
+The page stays visible outside the panel; the caller restores it on exit.
 """
 
-# Keys: e/j/down move down, u/k/up move up, E/U big jumps, gg/G ends,
-# Enter jumps, t/q/Esc closes, Ctrl-C quits the app. Counts multiply moves.
+import re
+
+# Keys: e/j/down move down, u/k/up move up, E/U big jumps, g/G ends,
+# +/- adjusts visible chapters, Enter jumps, q/Esc closes, Ctrl-C quits.
+# Counts multiply moves and size changes.
 
 _BIG_JUMP = 10
 
@@ -53,31 +54,108 @@ def _initial_sel(toc, page0):
     return sel
 
 
-def _draw(term, toc, sel, top):
-    term.write("\x1b[H\x1b[2J")
-    header = _fit(f" Table of Contents ({len(toc)})", term.cols - 1)
-    term.write(f"\x1b[7m{header}\x1b[27m")
-    visible = max(1, term.rows - 2)
+# Tokyo Night: night background, blue selection rail, subdued borders.
+# The terminal's monospace face keeps outline numbers and page indices aligned.
+_BG = "\x1b[48;2;26;27;38m"          # #1a1b26
+_SELECTED = "\x1b[48;2;41;46;66m"    # #292e42
+_PAPER = "\x1b[38;2;192;202;245m"   # #c0caf5
+_MUTED = "\x1b[38;2;169;177;214m"   # #a9b1d6
+_BORDER = "\x1b[38;2;86;95;137m"    # #565f89
+_ACCENT = "\x1b[38;2;122;162;247m"  # #7aa2f7
+_RESET = "\x1b[0m"
+
+
+def _pad(text, width):
+    """Fit and fill exactly width cells, including wide chapter titles."""
+    text = _fit(text, max(0, width))
+    return text + " " * max(0, width - _dw(text))
+
+
+def _safe_title(title):
+    """PDF outlines are untrusted: never print embedded terminal controls."""
+    title = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", title)
+    return "".join(ch if ch.isprintable() else " " for ch in title)
+
+
+def _panel_size(term, toc, requested):
+    """Clamp visible entries to the outline and the terminal's available rows."""
+    visible = max(1, min(requested, len(toc), term.rows - 10))
+    return visible, visible + 6
+
+
+def _stale_rows(term, old_height, new_height):
+    """Erase only rows the newly drawn panel no longer covers."""
+    width = min(66, term.cols - 4)
+    x = (term.cols - width) // 2 + 1
+    old_y = (term.rows - old_height) // 2 + 1
+    new_y = (term.rows - new_height) // 2 + 1
+    return "".join(f"\x1b[{row};{x}H{_RESET}{' ' * width}"
+                   for row in range(old_y, old_y + old_height)
+                   if not new_y <= row < new_y + new_height)
+
+
+def _draw(term, toc, sel, top, requested=15, previous_height=None):
+    cols, rows = term.cols, term.rows
+    if cols < 30 or rows < 12:
+        # Tiny terminals have room for only one useful line, not a frame.
+        line = _pad(f" {sel + 1}/{len(toc)}  {_safe_title(toc[sel][1])}"
+                    f"  p.{toc[sel][2]}", max(0, cols - 1))
+        term.write(f"\x1b[{max(1, rows // 2)};1H{_BG}{_PAPER}{line}{_RESET}")
+        return sel
+
+    width = min(66, cols - 4)
+    visible, height = _panel_size(term, toc, requested)
+    x = (cols - width) // 2 + 1
+    y = (rows - height) // 2 + 1
+    inner = width - 2
+    content = inner - 4
     if sel < top:
         top = sel
     if sel >= top + visible:
         top = sel - visible + 1
     top = max(0, min(top, max(0, len(toc) - visible)))
-    for i in range(top, min(top + visible, len(toc))):
+
+    def at(row, text, foreground=_PAPER, background=_BG):
+        return (f"\x1b[{y + row};{x}H{background}{foreground}"
+                f"{text}{_RESET}")
+
+    def body(text, foreground=_PAPER, background=_BG, rail=_BORDER):
+        return (f"{rail}│{foreground}{background}"
+                f"{_pad('  ' + text, inner)}{_BG}{_BORDER}│")
+
+    position = f"{sel + 1:02d} / {len(toc):02d}  ·  {min(visible, len(toc))} shown"
+    heading = "CONTENTS" + " " * max(1, content - 8 - _dw(position)) + position
+    parts = [at(0, "╭" + "─" * inner + "╮", _BORDER),
+             at(1, body(heading, _PAPER)),
+             at(2, "├" + "─" * inner + "┤", _BORDER)]
+
+    for offset in range(visible):
+        i = top + offset
+        if i >= len(toc):
+            parts.append(at(3 + offset, body("")))
+            continue
         level, title, page = toc[i]
-        right = f"{page}"
-        budget = max(3, term.cols - len(right) - 4)
-        body = _fit(f"{'❯' if i == sel else ' '} {'  ' * min(level - 1, 8)}"
-                    f"{title}", budget)
-        line = body + " " * max(1, budget - _dw(body)) + right + " "
-        if i == sel:
-            term.write(f"\x1b[{i - top + 2};1H\x1b[7m{line}\x1b[27m")
-        else:
-            term.write(f"\x1b[{i - top + 2};1H{line}")
-    hint = _fit(" e/u move · Enter jump · q/Esc close", term.cols - 1)
-    # _fit already bounded the hint to the line width by display cells, so
-    # writing it as-is can never cut a double-width glyph in half.
-    term.write(f"\x1b[{term.rows};1H{hint}")
+        active = i == sel
+        marker = "▏" if active else " "
+        prefix = f"{marker} {i + 1:02d}  " + "  " * min(max(level - 1, 0), 4)
+        suffix = f"  {page}"
+        title_width = max(0, content - _dw(prefix) - _dw(suffix))
+        name = _pad(_safe_title(title), title_width)
+        text = _pad(prefix + name + suffix, content)
+        fg = _ACCENT if active else _PAPER
+        bg = _SELECTED if active else _BG
+        parts.append(at(3 + offset, body(text, fg, bg,
+                                         _ACCENT if active else _BORDER)))
+
+    parts.extend([at(height - 3, "├" + "─" * inner + "┤", _BORDER),
+                  at(height - 2, body("↑↓ move   +/- size   Enter open   Esc close",
+                                      _MUTED)),
+                  at(height - 1, "╰" + "─" * inner + "╯", _BORDER)])
+    # Kitty's synchronized-update mode keeps the whole resize offscreen until
+    # the final frame. Never expose an empty card over the PDF in between.
+    cleanup = (_stale_rows(term, previous_height, height)
+               if previous_height is not None else "")
+    term.write("\x1b[?2026h" + "".join(parts) + cleanup + "\x1b[?2026l")
     return top
 
 
@@ -90,10 +168,15 @@ def toc_loop(term, toc, page0):
         return ("cancel", None)
     sel = _initial_sel(toc, page0)
     top = 0
-    top = _draw(term, toc, sel, top)
+    visible_rows = max(1, min(15, len(toc), term.rows - 10))
+    top = _draw(term, toc, sel, top, visible_rows)
     count = ""
     while True:
-        event = term.read_key(timeout=None)
+        event = term.read_key(timeout=0.25)
+        # The caller re-lays out the page on exit. Closing on resize avoids
+        # leaving a stale panel or a displaced image behind the new geometry.
+        if term.take_resize():
+            return ("cancel", None)
         if event is None:
             continue
         kind, val = event
@@ -104,6 +187,17 @@ def toc_loop(term, toc, page0):
         if kind == "char":
             if val.isdigit():
                 count += val
+                continue
+            if val in ("+", "=", "-", "_"):
+                delta = n if val in ("+", "=") else -n
+                limit = max(1, min(len(toc), term.rows - 10))
+                new_rows = max(1, min(limit, visible_rows + delta))
+                count = ""
+                if new_rows != visible_rows:
+                    old_height = _panel_size(term, toc, visible_rows)[1]
+                    visible_rows = new_rows
+                    top = _draw(term, toc, sel, top, visible_rows,
+                                previous_height=old_height)
                 continue
             if val in ("e", "j"):
                 sel = _clamp_sel(toc, sel + n)
@@ -149,4 +243,4 @@ def toc_loop(term, toc, page0):
             count = ""
             continue
         count = ""
-        top = _draw(term, toc, sel, top)
+        top = _draw(term, toc, sel, top, visible_rows)

@@ -185,6 +185,9 @@ class FakeTocTerm:
     def read_key(self, timeout=None):
         return self.events.pop(0) if self.events else ("eof", "")
 
+    def take_resize(self):
+        return False
+
 
 TOC = [(1, "Chapter One", 3), (1, "Chapter Two", 7), (2, "Deep dive", 11)]
 
@@ -243,11 +246,75 @@ class TocLoopTests(unittest.TestCase):
         # 't' must not toggle the overlay closed (key-repeat oscillation).
         result, t = self.run_toc([("char", "t"), ("enter", "\r")])
         self.assertEqual(result, ("jump", 2))
-        self.assertGreater(len(t.output), 1)  # it kept drawing, stayed open
+        self.assertIn("CONTENTS", "".join(t.output))  # panel stayed open
 
     def test_draw_survives_narrow_terminal(self):
         narrow = FakeTocTerm([("enter", "\r")], cols=10, rows=4)
         toc.toc_loop(narrow, TOC, 0)  # must not raise
+
+    def test_panel_is_bounded_and_leaves_page_visible(self):
+        _, term = self.run_toc([("enter", "\r")])
+        output = "".join(term.output)
+        self.assertNotIn("\x1b[2J", output)
+        self.assertIn("\x1b[12;8H", output)  # 66x9 panel centred in 80x31
+        self.assertIn("CONTENTS", output)
+        self.assertIn("Enter open", output)
+        self.assertIn("Chapter One", output)
+
+    def test_long_outline_scrolls_inside_panel(self):
+        entries = [(1, f"Chapter {i}", i + 1) for i in range(40)]
+        term = FakeTocTerm([("enter", "\r")])
+        toc.toc_loop(term, entries, 29)
+        output = "".join(term.output)
+        self.assertIn("Chapter 29", output)
+        self.assertIn("30 / 40", output)
+        self.assertNotIn("\x1b[2J", output)
+
+    def test_plus_minus_resize_and_restore_page_around_panel(self):
+        entries = [(1, f"Chapter {i}", i + 1) for i in range(40)]
+        term = FakeTocTerm([("char", "+"), ("char", "-"), ("enter", "\r")])
+        result = toc.toc_loop(term, entries, 0)
+        self.assertEqual(result, ("jump", 0))
+        drawings = [part for part in term.output if "CONTENTS" in part]
+        self.assertEqual(len(drawings), 3)  # no separate clear/write flush
+        self.assertEqual(len(term.output), 3)
+        self.assertIn("15 shown", drawings[0])
+        self.assertIn("16 shown", drawings[1])
+        self.assertIn("15 shown", drawings[2])
+        for drawing in drawings:
+            self.assertTrue(drawing.startswith("\x1b[?2026h"))
+            self.assertTrue(drawing.endswith("\x1b[?2026l"))
+        self.assertIn("\x1b[5;8H", drawings[1])  # taller card is re-centred
+        self.assertIn("\x1b[6;8H", drawings[2])
+        self.assertNotIn("\x1b[0m" + " " * 66, drawings[1])  # no erase on grow
+        self.assertIn("\x1b[5;8H\x1b[0m" + " " * 66, drawings[2])
+        self.assertNotIn("\x1b[2J", "".join(term.output))
+
+    def test_resize_count_and_terminal_bounds(self):
+        entries = [(1, f"Chapter {i}", i + 1) for i in range(40)]
+        term = FakeTocTerm([("char", "9"), ("char", "="),
+                            ("char", "9"), ("char", "+"),
+                            ("char", "9"), ("char", "_"),
+                            ("char", "9"), ("char", "-"),
+                            ("char", "9"), ("char", "-"),
+                            ("enter", "\r")])
+        toc.toc_loop(term, entries, 0)
+        drawings = [part for part in term.output if "CONTENTS" in part]
+        self.assertEqual(len(drawings), 5)  # hitting the maximum does not redraw
+        for drawing, expected in zip(drawings, (15, 21, 12, 3, 1), strict=True):
+            self.assertIn(f"{expected} shown", drawing)
+
+    def test_draw_sanitizes_outline_controls(self):
+        term = FakeTocTerm([("enter", "\r")])
+        toc.toc_loop(term, [(1, "Safe\x1b[2J\nTitle", 1)], 0)
+        output = "".join(term.output)
+        self.assertIn("Safe Title", output)
+        self.assertNotIn("Safe\x1b[2J", output)
+
+    def test_resize_closes_panel_for_page_relayout(self):
+        term = FakeTocTerm([("char", "j")])
+        term.take_resize = lambda: True
+        self.assertEqual(toc.toc_loop(term, TOC, 0), ("cancel", None))
 
     def test_unknown_key_clears_count(self):
         result, _ = self.run_toc([("char", "2"), ("char", "z"),

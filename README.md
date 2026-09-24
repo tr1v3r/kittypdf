@@ -65,11 +65,13 @@ has no horizontal motion, so nothing competes for it.
 
 ## Table of contents
 
-`t` opens the chapter list from the PDF outline. Move with `e` / `u` (or
-`j` / `k`, arrows), `E` / `U` jump ten, `gg` / `G` go to the ends, `Enter`
-jumps to the selected chapter, `q` / `Esc` closes the overlay. `t`
-deliberately does **not** close it: the key that opens a mode must not also
-close it, or holding it oscillates the overlay open and shut.
+`t` opens a floating chapter list over the PDF page. Move with `e` / `u`
+(or `j` / `k`, arrows), `E` / `U` jump ten, `g` / `G` go to the ends, `Enter`
+jumps to the selected chapter. `+` / `-` changes the number of visible
+chapters (`=` also enlarges; counts work, e.g. `5+`), up to the terminal's
+available height. `q` / `Esc` closes the panel. `t` deliberately does **not**
+close it: the key that opens a mode must not also close it, or holding it
+oscillates the overlay open and shut.
 
 ## Dual-page spreads
 

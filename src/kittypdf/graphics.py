@@ -13,6 +13,10 @@ import time
 _APC_START = b"\x1b_G"
 _APC_END = b"\x1b\\"
 _CHUNK = 4096
+# Kitty draws images with z < INT32_MIN/2 beneath cells with a custom
+# background. The ToC card needs this so its background hides the PDF while
+# the page remains visible around it.
+_PAGE_Z = -1073741825
 
 
 def _apc(cmd, payload=b""):
@@ -112,7 +116,7 @@ def send_image(term, image_id, png_bytes):
 def place(term, image_id, row, col):
     """Place an image without moving the text cursor or scrolling the screen."""
     term.write(f"\x1b[{row};{col}H")
-    term.write_bytes(_apc({"a": "p", "i": image_id, "z": -1, "C": 1,
+    term.write_bytes(_apc({"a": "p", "i": image_id, "z": _PAGE_Z, "C": 1,
                            "q": 2}))
 
 
