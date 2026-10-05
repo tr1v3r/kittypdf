@@ -12,10 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from kittypdf.render import Document  # noqa: E402
 
 
-def make_epub(chapters):
-    """Minimal EPUB3 with a nav TOC; chapters is [(title, href, body), ...]."""
-    tmpdir = tempfile.mkdtemp()
-    path = os.path.join(tmpdir, "book.epub")
+def make_epub(path, chapters):
+    """Write a minimal EPUB3; chapters is [(title, href, body), ...]."""
     manifest = "\n".join(
         f'<item id="c{i}" href="{href}" media-type="application/xhtml+xml"/>'
         for i, (_, href, _) in enumerate(chapters))
@@ -53,19 +51,24 @@ def make_epub(chapters):
 </html>''')
         for _, href, body in chapters:
             z.writestr(f"OEBPS/{href}", f"<html><body>{body}</body></html>")
-    return path
 
 
 class TestEpub(unittest.TestCase):
     def test_open_render_toc(self):
-        path = make_epub([
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        path = os.path.join(tmpdir.name, "book.epub")
+        make_epub(path, [
             ("Chapter One", "c1.xhtml", "<h1>One</h1><p>text</p>"),
             ("Chapter Two", "c2.xhtml", "<h1>Two</h1><p>text</p>"),
         ])
         doc = Document(path)
+        self.addCleanup(doc.doc.close)
         self.assertEqual(doc.page_count, 2)
-        self.assertEqual([entry[1] for entry in doc.toc],
-                         ["Chapter One", "Chapter Two"])
+        self.assertEqual(doc.toc, [
+            [1, "Chapter One", 1],
+            [1, "Chapter Two", 2],
+        ])
         for page_no in range(doc.page_count):
             w, h = doc.page_size(page_no)
             self.assertGreater(w, 0)
