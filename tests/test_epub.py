@@ -2,6 +2,7 @@
 TOC path must work unchanged (regression net for the epub enablement)."""
 
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,8 +13,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from kittypdf.render import Document  # noqa: E402
 
 
-def make_epub(path, chapters):
-    """Write a minimal EPUB3; chapters is [(title, href, body), ...]."""
+def make_epub(path, chapters, css=None):
+    """Write a minimal EPUB3; chapters is [(title, href, body), ...].
+
+    With css, it is linked from every chapter — for fixtures that trip
+    MuPDF's CSS parser (e.g. device-font @font-face src urls).
+    """
+    head = ""
+    if css is not None:
+        head = ('<head><link rel="stylesheet" type="text/css" '
+                'href="style.css"/></head>')
     manifest = "\n".join(
         f'<item id="c{i}" href="{href}" media-type="application/xhtml+xml"/>'
         for i, (_, href, _) in enumerate(chapters))
@@ -26,6 +35,8 @@ def make_epub(path, chapters):
         for title, href, _ in chapters)
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("mimetype", "application/epub+zip")
+        if css is not None:
+            z.writestr("OEBPS/style.css", css)
         z.writestr(
             "META-INF/container.xml",
             '<?xml version="1.0"?>'
@@ -50,7 +61,7 @@ def make_epub(path, chapters):
   <body><nav epub:type="toc"><ol>{nav_items}</ol></nav></body>
 </html>''')
         for _, href, body in chapters:
-            z.writestr(f"OEBPS/{href}", f"<html><body>{body}</body></html>")
+            z.writestr(f"OEBPS/{href}", f"<html>{head}<body>{body}</body></html>")
 
 
 class TestEpub(unittest.TestCase):
@@ -77,6 +88,27 @@ class TestEpub(unittest.TestCase):
             self.assertGreater(len(png), 0)
             self.assertLessEqual(pw, 400)
             self.assertLessEqual(ph, 600)
+
+    def test_render_is_silent_on_device_font_css(self):
+        # Sony-style CSS references reader-builtin fonts by device path;
+        # MuPDF cannot find them, falls back, and used to print one
+        # "MuPDF error" per reference to stderr — garbling the TUI.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        path = os.path.join(tmpdir.name, "sony.epub")
+        make_epub(path, [("One", "c1.xhtml", "<p>text</p>")],
+                  css="@font-face { font-family: sony; "
+                      "src: url(res:///opt/sony/ebook/FONT/tt0011m_.ttf); } "
+                      "body { font-family: sony; }")
+        srcdir = os.path.join(os.path.dirname(__file__), "..", "src")
+        code = (f"import sys; sys.path.insert(0, {srcdir!r}); "
+                f"from kittypdf.render import Document; "
+                f"doc = Document({path!r}); "
+                f"assert doc.render(0, 400, 600)[0]; doc.doc.close()")
+        # C-level stderr is only reliably observable in a fresh process.
+        proc = subprocess.run([sys.executable, "-c", code], capture_output=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, b"")
 
 
 if __name__ == "__main__":
