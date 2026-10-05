@@ -14,6 +14,8 @@ _CROP_PADDING = 8       # points of breathing room kept around the content
 class Document:
     def __init__(self, path):
         self.path = path
+        # MuPDF's layout engine opens EPUBs too, reflowing the HTML into
+        # fixed-size pages; everything below is format-agnostic.
         self.doc = pymupdf.open(path)
         if self.doc.needs_pass:
             # Owner-password-only PDFs encrypt permissions but leave the

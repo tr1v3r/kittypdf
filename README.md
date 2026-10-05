@@ -1,15 +1,18 @@
 # kittypdf
 
-A minimal PDF reader that lives inside the [kitty](https://sw.kovidgoyal.net/kitty/)
-terminal. Pages are rendered by [PyMuPDF](https://pymupdf.readthedocs.io/) and
-drawn as real pixels through kitty's graphics protocol — no ASCII art.
+A minimal PDF/EPUB reader that lives inside the
+[kitty](https://sw.kovidgoyal.net/kitty/) terminal. Pages are rendered by
+[PyMuPDF](https://pymupdf.readthedocs.io/) and drawn as real pixels through
+kitty's graphics protocol — no ASCII art. EPUB files are laid out by MuPDF's
+reflowable-HTML engine into fixed pages, so everything below works the same
+for both formats.
 
 Written from scratch; inspired by the (dormant) `termpdf.py`.
 
 ## Usage
 
 ```sh
-kittypdf book.pdf              # or the `pdf` alias
+kittypdf book.pdf              # or book.epub; the `pdf` alias
 kittypdf -p 20 book.pdf        # open at page 20 (1-based)
 kittypdf -m dual book.pdf       # start layout: auto | single | dual
 kittypdf --transparent book.pdf # show unpainted paper over kitty's background
