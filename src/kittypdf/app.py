@@ -286,8 +286,8 @@ class Reader:
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="kittypdf",
-        description="Read a PDF inside the kitty terminal.")
-    parser.add_argument("file", help="path to a PDF file")
+        description="Read a PDF or EPUB inside the kitty terminal.")
+    parser.add_argument("file", help="path to a PDF or EPUB file")
     parser.add_argument("-p", "--page", type=int, default=None,
                         help="open at this page (1-based)")
     parser.add_argument("-m", "--mode", choices=_MODES, default="auto",
