@@ -51,7 +51,7 @@ def make_epub(chapters):
   xmlns:epub="http://www.idpf.org/2007/ops">
   <body><nav epub:type="toc"><ol>{nav_items}</ol></nav></body>
 </html>''')
-        for i, (_, href, body) in enumerate(chapters):
+        for _i, (_, href, body) in enumerate(chapters):
             z.writestr(f"OEBPS/{href}", f"<html><body>{body}</body></html>")
     return path
 
