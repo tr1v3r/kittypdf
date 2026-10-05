@@ -2,6 +2,14 @@
 
 import pymupdf
 
+# Real-world EPUBs routinely trip MuPDF's strict parsers: CSS @font-face
+# pointing at device fonts (e.g. Sony's res:///opt/sony/ebook/...), slack
+# HTML markup. MuPDF recovers and renders fine, but prints each complaint
+# to stderr, garbling the TUI. Silence the chatter; fatal errors still
+# raise Python exceptions and accumulated warnings remain available via
+# pymupdf.TOOLS.mupdf_warnings().
+pymupdf.TOOLS.mupdf_display_errors(False)
+
 # Hard ceiling so an accidentally huge terminal cannot explode memory.
 _MAX_PIXELS = 8_000_000
 
