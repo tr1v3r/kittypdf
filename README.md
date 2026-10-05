@@ -12,7 +12,7 @@ Written from scratch; inspired by the (dormant) `termpdf.py`.
 ## Usage
 
 ```sh
-kittypdf book.pdf              # or book.epub; the `pdf` alias
+kittypdf book.pdf              # or book.epub
 kittypdf -p 20 book.pdf        # open at page 20 (1-based)
 kittypdf -m dual book.pdf       # start layout: auto | single | dual
 kittypdf --transparent book.pdf # show unpainted paper over kitty's background
