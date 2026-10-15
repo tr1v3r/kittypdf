@@ -60,7 +60,7 @@ class Terminal:
 
     def exit(self):
         try:
-            self.write("\x1b[<u\x1b[?25h\x1b[?1049l")  # pop keyboard flags
+            self.write("\x1b[?2026l\x1b[<u\x1b[?25h\x1b[?1049l")  # end sync, pop keys
         except Exception:
             pass
         if self._attrs is not None:

@@ -9,10 +9,12 @@ response we read is the one-time support probe (a=q always replies).
 import base64
 import select
 import time
+from contextlib import contextmanager
 
 _APC_START = b"\x1b_G"
 _APC_END = b"\x1b\\"
 _CHUNK = 4096
+_WRITE_BATCH = 64 * 1024  # amortize flushes without buffering an entire large PNG
 # Kitty draws images with z < INT32_MIN/2 beneath cells with a custom
 # background. The ToC card needs this so its background hides the PDF while
 # the page remains visible around it.
@@ -103,32 +105,50 @@ def send_image(term, image_id, png_bytes):
     rejects the data.  Plain f=100 avoids both problems.
     """
     data = base64.standard_b64encode(png_bytes)
-    first = True
-    while data:
-        chunk, data = data[:_CHUNK], data[_CHUNK:]
-        cmd = {"q": 2, "m": 1 if data else 0}
-        if first:
+    batch = bytearray()
+    for offset in range(0, len(data), _CHUNK):
+        end = offset + _CHUNK
+        cmd = {"q": 2, "m": int(end < len(data))}
+        if offset == 0:
             cmd.update({"a": "t", "i": image_id, "f": 100})
-            first = False
-        term.write_bytes(_apc(cmd, chunk))
+        # Slice only this chunk, not the entire remaining payload (quadratic
+        # copying on scan-heavy pages). Each APC payload stays <= 4096 bytes.
+        batch.extend(_apc(cmd, data[offset:end]))
+        if len(batch) >= _WRITE_BATCH:
+            term.write_bytes(bytes(batch))
+            batch.clear()
+    if batch:
+        term.write_bytes(bytes(batch))
+
+
+@contextmanager
+def synchronized(term):
+    """Commit a short visual update as one frame on supporting terminals.
+
+    Render and upload BEFORE entering: a slow PNG must not hold synchronized
+    output open long enough for the terminal's safety timeout to expire.
+    """
+    term.write("\x1b[?2026h")
+    try:
+        yield
+    finally:
+        term.write("\x1b[?2026l")
 
 
 def place(term, image_id, row, col):
     """Place an image without moving the text cursor or scrolling the screen."""
     term.write(f"\x1b[{row};{col}H")
-    term.write_bytes(_apc({"a": "p", "i": image_id, "z": _PAGE_Z, "C": 1,
+    term.write_bytes(_apc({"a": "p", "i": image_id, "p": 1, "z": _PAGE_Z, "C": 1,
                            "q": 2}))
 
 
 def delete_image(term, image_id):
-    """Delete one image entirely (d=i frees data + placements).
+    """Free one image and its placements (uppercase I also releases data).
 
-    kitty's plain a=d,i=<id> only removes the image's visible placements
-    while keeping the transmitted bitmap in memory; d=i additionally frees
-    the stored data, which is what page-turn invalidation wants (the id is
-    re-transmitted for the next draw anyway).
+    Lowercase d=i removes only placements; also release retired bitmaps rather
+    than keeping them in terminal memory until their IDs are reused.
     """
-    term.write_bytes(_apc({"a": "d", "d": "i", "i": image_id, "q": 2}))
+    term.write_bytes(_apc({"a": "d", "d": "I", "i": image_id, "q": 2}))
 
 
 def delete_all(term):

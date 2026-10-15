@@ -12,8 +12,7 @@ from .render import Document
 from .term import Terminal
 from .toc import _dw, _fit, toc_loop
 
-_IMAGE_ID = 1
-_IMAGE_ID_R = 2          # right page in dual-page (spread) mode
+_IMAGE_BANKS = ((1, 2), (3, 4))  # alternate front/back pairs for atomic page turns
 _GUTTER_CELLS = 1        # blank columns between the two pages of a spread
 _MODES = ("auto", "single", "dual")
 
@@ -117,8 +116,9 @@ class Reader:
         self.mode = "auto"       # auto | single | dual
         self._sent = None        # signature of what is currently on screen
         self._spread = False     # whether the last draw was a two-page spread
-        self._size = (1, 1)      # single-page image pixel size
-        self._spread_imgs = [None, None]  # cached (png, w, h) for the pair
+        self._bank = 1           # first draw uploads into bank 0
+        self._active = ()        # IDs owned by the currently displayed frame
+        self._clear = False      # defer screen clears until the next frame is ready
 
     # -- layout ---------------------------------------------------------
 
@@ -159,87 +159,66 @@ class Reader:
     # -- drawing --------------------------------------------------------
 
     def invalidate(self):
-        """Force a re-render (and wipe leftovers) on resize/refresh."""
+        """Request a fresh frame, deferring the clear until it is ready."""
         self._sent = None
-        graphics.delete_all(self.term)
-        self.term.write("\x1b[2J")
+        self._clear = True
 
-    def draw(self):
+    def draw(self, count=""):
+        """Prepare off-screen, then swap page(s) and footer in one short update."""
+        t = self.term
         avail_w, avail_h = self._viewport()
         spread = self._want_spread(avail_w, avail_h)
-        self._spread = spread
-        if spread:
-            self._draw_spread(avail_w, avail_h)
-        else:
-            self._draw_single(avail_w, avail_h)
+        left, right = self._pair() if spread else (self.page, None)
+        sig = (spread, left, right, self.invert, self.autocrop,
+               self.transparent, avail_w, avail_h, t.cell_w, t.cell_h)
+        if sig == self._sent:
+            self.status(count)
+            return  # no duplicate placements (important for transparent pages)
 
-    def _draw_single(self, avail_w, avail_h):
-        t = self.term
-        sig = ("single", self.page, self.invert, self.autocrop,
-               self.transparent, avail_w, avail_h)
-        if sig != self._sent:
-            try:
-                png, w, h = self.doc.render(self.page, avail_w, avail_h,
+        gutter = _GUTTER_CELLS * t.cell_w
+        page_w = (avail_w - gutter) / 2 if spread else avail_w
+        bank = 1 - self._bank
+        frame = []
+        try:
+            # Finish BOTH renders before touching the terminal. A failed right
+            # page must leave the entire old spread on screen.
+            for slot, pno in enumerate((left, right)):
+                if pno is None:
+                    continue
+                png, w, h = self.doc.render(pno, page_w, avail_h,
                                             invert=self.invert,
                                             autocrop=self.autocrop,
                                             transparent=self.transparent)
-            except Exception as exc:  # noqa: BLE001 - report and stay alive
-                self.status(msg=f"render error: {exc}")
-                return
-            graphics.delete_image(t, _IMAGE_ID_R)
-            graphics.delete_image(t, _IMAGE_ID)
-            graphics.send_image(t, _IMAGE_ID, png)
-            self._sent = sig
-            self._size = (w, h)
-        w, h = self._size
-        col = int((avail_w - w) / 2 / t.cell_w) + 1
-        row = int((avail_h - h) / 2 / t.cell_h) + 1
-        graphics.place(t, _IMAGE_ID, row, col)
+                x = (avail_w - w) / 2
+                if spread:
+                    x = page_w - w if slot == 0 else page_w + gutter
+                row = int((avail_h - h) / 2 / t.cell_h) + 1
+                col = max(1, int(x / t.cell_w) + 1)
+                frame.append((_IMAGE_BANKS[bank][slot], png, row, col))
+        except Exception as exc:  # noqa: BLE001 - report and stay alive
+            self.status(msg=f"render error: {exc}")
+            return
 
-    def _draw_spread(self, avail_w, avail_h):
-        t = self.term
-        left, right = self._pair()
-        sig = ("dual", left, right, self.invert, self.autocrop,
-               self.transparent, avail_w, avail_h)
-        gutter = _GUTTER_CELLS * t.cell_w
-        half = (avail_w - gutter) / 2
-        if sig != self._sent:
-            try:
-                imgs = []
-                for pno in (left, right):
-                    if pno is None:
-                        imgs.append(None)
-                        continue
-                    png, w, h = self.doc.render(pno, half, avail_h,
-                                                invert=self.invert,
-                                                autocrop=self.autocrop,
-                                                transparent=self.transparent)
-                    imgs.append((png, w, h))
-            except Exception as exc:  # noqa: BLE001
-                self.status(msg=f"render error: {exc}")
-                return
-            graphics.delete_image(t, _IMAGE_ID)
-            graphics.delete_image(t, _IMAGE_ID_R)
-            if imgs[0]:
-                graphics.send_image(t, _IMAGE_ID, imgs[0][0])
-            if imgs[1]:
-                graphics.send_image(t, _IMAGE_ID_R, imgs[1][0])
-            self._sent = sig
-            self._spread_imgs = imgs
-        imgs = self._spread_imgs
-        # left page: right-aligned against the gutter; right page: left-aligned
-        if imgs[0]:
-            _, w, h = imgs[0]
-            x = half - w                      # hug the centre gutter
-            row = int((avail_h - h) / 2 / t.cell_h) + 1
-            col = int(x / t.cell_w) + 1
-            graphics.place(t, _IMAGE_ID, row, max(col, 1))
-        if imgs[1]:
-            _, w, h = imgs[1]
-            x = half + gutter                 # start just past the gutter
-            row = int((avail_h - h) / 2 / t.cell_h) + 1
-            col = int(x / t.cell_w) + 1
-            graphics.place(t, _IMAGE_ID_R, row, col)
+        # Transmit into inactive IDs: reusing a visible ID would delete the old
+        # image immediately. Never hold synchronized output over slow uploads.
+        for image_id, png, _, _ in frame:
+            graphics.send_image(t, image_id, png)
+        with graphics.synchronized(t):
+            if self._clear:
+                # ED2 (CSI 2J) frees even newly uploaded, unplaced images in
+                # kitty. EL2 clears text only, preserving both image banks.
+                t.write("\x1b[0m" + "".join(
+                    f"\x1b[{row};1H\x1b[2K" for row in range(1, t.rows + 1)))
+            for image_id, _, row, col in frame:
+                graphics.place(t, image_id, row, col)
+            for image_id in self._active:
+                graphics.delete_image(t, image_id)
+            self._spread = spread
+            self.status(count)
+        self._bank = bank
+        self._active = tuple(image_id for image_id, _, _, _ in frame)
+        self._sent = sig
+        self._clear = False
 
     def status(self, count="", msg=""):
         t = self.term
@@ -350,6 +329,10 @@ def main(argv=None):
     finally:
         try:
             graphics.delete_all(term)
+            # Also free inactive uploads if an exception interrupted the swap.
+            for bank in _IMAGE_BANKS:
+                for image_id in bank:
+                    graphics.delete_image(term, image_id)
         except Exception:
             pass
         term.exit()
@@ -368,7 +351,6 @@ def _loop(reader, doc, term, path, progress):
 
     reader.invalidate()
     reader.draw()
-    reader.status()
 
     def checkpoint():
         progress.save(path, reader.page, reader.invert, reader.autocrop,
@@ -377,13 +359,11 @@ def _loop(reader, doc, term, path, progress):
     def redraw():
         reader.invalidate()
         reader.draw()
-        reader.status()
 
     while True:
         if term.take_resize():
             reader.invalidate()
-            reader.draw()
-            reader.status(count)
+            reader.draw(count)
 
         event = term.read_key(timeout=0.25)
         if event is None:
@@ -479,7 +459,6 @@ def _loop(reader, doc, term, path, progress):
         count = ""
         pending_g = False
         reader.draw()
-        reader.status()
         checkpoint()
 
 

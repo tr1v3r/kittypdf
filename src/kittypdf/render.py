@@ -1,5 +1,7 @@
 """Page rendering: PyMuPDF page -> PNG bytes fitted to the viewport."""
 
+from collections import OrderedDict
+
 import pymupdf
 
 # Real-world EPUBs routinely trip MuPDF's strict parsers: CSS @font-face
@@ -12,6 +14,10 @@ pymupdf.TOOLS.mupdf_display_errors(False)
 
 # Hard ceiling so an accidentally huge terminal cannot explode memory.
 _MAX_PIXELS = 8_000_000
+
+# Keep recent PNGs without retaining an unbounded history of pages or sizes.
+_RENDER_CACHE_MAX_ENTRIES = 16
+_RENDER_CACHE_MAX_BYTES = 64 * 1024 * 1024
 
 # Autocrop probe: render small, find the bounding box of non-paper pixels.
 _CROP_PROBE_W = 200     # probe pixmap target width in pixels
@@ -34,6 +40,8 @@ class Document:
         self.page_count = self.doc.page_count
         self.toc = self.doc.get_toc()  # [[level, title, page_1based], ...]
         self._crop_cache = {}
+        self._render_cache = OrderedDict()
+        self._render_cache_bytes = 0
 
     def page_size(self, page_no, autocrop=False):
         """(width, height) of the page in points, honouring autocrop."""
@@ -51,7 +59,32 @@ class Document:
 
         Returns (png_bytes, width, height). With transparent=True, unpainted
         areas retain their alpha; explicit backgrounds and scans are not erased.
+        Recent results are cached per document, bounded by entry count and PNG bytes.
         """
+        key = (page_no, max_w, max_h, invert, autocrop, transparent)
+        cached = self._render_cache.get(key)
+        if cached is not None:
+            self._render_cache.move_to_end(key)
+            return cached
+
+        result = self._render_uncached(page_no, max_w, max_h, invert, autocrop,
+                                       transparent)
+        size = len(result[0])
+        # Oversized results still render, but do not displace useful cached pages.
+        if _RENDER_CACHE_MAX_ENTRIES <= 0 or size > _RENDER_CACHE_MAX_BYTES:
+            return result
+        while self._render_cache and (
+                len(self._render_cache) >= _RENDER_CACHE_MAX_ENTRIES
+                or self._render_cache_bytes + size > _RENDER_CACHE_MAX_BYTES):
+            _, evicted = self._render_cache.popitem(last=False)
+            self._render_cache_bytes -= len(evicted[0])
+        self._render_cache[key] = result
+        self._render_cache_bytes += size
+        return result
+
+    def _render_uncached(self, page_no, max_w, max_h, invert=False, autocrop=False,
+                         transparent=False):
+        """Render synchronously; only successful PNG results enter the cache."""
         page = self.doc.load_page(page_no)
         rect = page.rect
         if autocrop:
