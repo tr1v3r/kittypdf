@@ -7,6 +7,7 @@ import os
 import sys
 
 from . import __version__, graphics
+from .help import help_loop
 from .render import Document
 from .term import Terminal
 from .toc import _dw, _fit, toc_loop
@@ -242,7 +243,7 @@ class Reader:
 
     def status(self, count="", msg=""):
         t = self.term
-        left = msg or (count if count else "kittypdf")
+        left = msg or (count if count else "kittypdf  ? help")
         flags = (("-" if self.invert else "")
                  + ("c" if self.autocrop else "")
                  + ("a" if self.transparent else ""))
@@ -373,6 +374,11 @@ def _loop(reader, doc, term, path, progress):
         progress.save(path, reader.page, reader.invert, reader.autocrop,
                       reader.transparent)
 
+    def redraw():
+        reader.invalidate()
+        reader.draw()
+        reader.status()
+
     while True:
         if term.take_resize():
             reader.invalidate()
@@ -418,7 +424,7 @@ def _loop(reader, doc, term, path, progress):
                 reader.invalidate()   # layout change: wipe and re-lay-out
             elif val == "t":
                 term.drain_typeahead()  # drop repeat backlog before entering
-                action, value = toc_loop(term, doc.toc, reader.page)
+                action, value = toc_loop(term, doc.toc, reader.page, redraw=redraw)
                 term.drain_typeahead()  # and on the way out, so a held key
                                         # cannot oscillate the overlay
                 if action == "eof":
@@ -432,6 +438,14 @@ def _loop(reader, doc, term, path, progress):
                 # overlay's erase has dropped the placement -- which is why
                 # cancel (q/Esc) looked stuck on the ToC while Enter, which
                 # changes the page and re-transmits, worked.
+                reader.invalidate()
+            elif val == "?":
+                term.drain_typeahead()
+                action = help_loop(term)
+                term.drain_typeahead()
+                if action == "eof":
+                    checkpoint()
+                    return
                 reader.invalidate()
             elif val in ("r", "R"):
                 reader.invalidate()
