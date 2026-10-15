@@ -243,11 +243,12 @@ class TocLoopTests(unittest.TestCase):
         self.assertEqual(self.run_toc([("esc", "")])[0], ("cancel", None))
         self.assertEqual(self.run_toc([("ctrl", "C")])[0], ("eof", None))
 
-    def test_t_does_not_close_overlay(self):
-        # 't' must not toggle the overlay closed (key-repeat oscillation).
-        result, t = self.run_toc([("char", "t"), ("enter", "\r")])
-        self.assertEqual(result, ("jump", 2))
-        self.assertIn("CONTENTS", "".join(t.output))  # panel stayed open
+    def test_t_closes_overlay_without_consuming_following_keys(self):
+        result, term = self.run_toc([("char", "j"), ("char", "3"),
+                                     ("char", "t"), ("enter", "\r")])
+        self.assertEqual(result, ("cancel", None))
+        self.assertEqual(term.events, [("enter", "\r")])
+        self.assertIn("t/Esc close", "".join(term.output))
 
     def test_draw_survives_narrow_terminal(self):
         narrow = FakeTocTerm([("enter", "\r")], cols=10, rows=4)
@@ -484,8 +485,7 @@ class HelpLoopTests(unittest.TestCase):
     def run_help(self, events, cols=80, rows=31, resizes=(), context="reader"):
         term = LoopFakeTerm(events, resizes)
         term.cols, term.rows = cols, rows
-        with mock.patch("kittypdf.help.graphics.delete_all"):
-            result = help_mod.help_loop(term, context=context)
+        result = help_mod.help_loop(term, context=context)
         return result, term
 
     def test_reference_includes_all_contexts_and_aliases(self):
@@ -514,7 +514,20 @@ class HelpLoopTests(unittest.TestCase):
             with self.subTest(event=event):
                 result, term = self.run_help([("char", "?"), event])
                 self.assertEqual(result, expected)
-                self.assertEqual(len(term.output), 2)  # clear + one stable card
+                self.assertEqual(len(term.output), 1)  # one stable overlay, no clear
+
+    def test_help_never_clears_screen_or_deletes_pdf_images(self):
+        for cols, rows in ((120, 40), (80, 31), (10, 4), (1, 1)):
+            with self.subTest(cols=cols, rows=rows):
+                with mock.patch("kittypdf.graphics.delete_all") as delete_all:
+                    result, term = self.run_help([("char", "e"), ("char", "G"),
+                                                  ("esc", "")], cols, rows)
+                self.assertEqual(result, "cancel")
+                delete_all.assert_not_called()
+                self.assertTrue(all(isinstance(text, str) for text in term.output))
+                output = "".join(term.output)
+                self.assertNotIn("\x1b[2J", output)
+                self.assertNotIn("\x1b_G", output)  # no graphics deletion commands
 
     def test_scroll_reaches_all_sections_and_home_restores_start(self):
         result, term = self.run_help([None, ("char", "E"), ("key", "pgdn"),
@@ -612,6 +625,33 @@ class LoopDispatchTests(unittest.TestCase):
         reader, _, _ = run_loop([("char", "t"), ("char", "q"),
                                  ("char", "q")])
         self.assertEqual(reader.page, 0)          # cancel keeps the page
+
+    def test_toc_t_toggle_restores_page_and_clears_count(self):
+        with mock.patch.object(Reader, "invalidate", autospec=True,
+                               side_effect=Reader.invalidate) as invalidate:
+            reader, term, _ = run_loop([("char", "2"), ("char", "e"),
+                                        ("char", "3"), ("char", "t"),
+                                        ("char", "j"), ("char", "t"),
+                                        ("char", "e"), ("char", "q")])
+        self.assertEqual(reader.page, 3)  # cancel keeps page 2, then one step
+        self.assertEqual(invalidate.call_count, 2)  # initial draw + overlay restore
+        self.assertEqual(term.drains, 2)
+
+    def test_toc_help_keeps_pdf_and_returns_to_t_toggle(self):
+        term = LoopFakeTerm([("char", "j"), ("char", "-"), ("char", "?"),
+                             ("char", "G"), ("char", "q"), ("char", "t")])
+        redraw = mock.Mock()
+        with mock.patch("kittypdf.graphics.delete_all") as delete_all:
+            action = toc.toc_loop(term, TOC, 0, redraw=redraw)
+        self.assertEqual(action, ("cancel", None))
+        delete_all.assert_not_called()
+        redraw.assert_called_once_with()
+        self.assertNotIn("\x1b[2J", "".join(term.output))
+        self.assertEqual(term.drains, 2)
+        drawings = [text for text in term.output if "CONTENTS" in text
+                    and "SHORTCUTS" not in text]
+        self.assertEqual(drawings[-1].rsplit("╯", 1)[0],
+                         drawings[-2].rsplit("╯", 1)[0])
 
     def test_toc_eof_quits_app(self):
         reader, _, progress = run_loop([("char", "t"), ("ctrl", "C")])

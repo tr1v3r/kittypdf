@@ -26,7 +26,9 @@ Press `?` in the reader or table of contents to open the scrollable keyboard
 reference. It lists all reader, contents, and help bindings, with the current
 view first. Use `e` / `u` (or arrows) to scroll, `PgDn` / `PgUp` for a screen,
 and `q` / `Esc` to return without changing your page or chapter selection.
-Holding `?` keeps help open rather than toggling it repeatedly.
+Like the contents panel, help floats over the page without clearing the PDF;
+content outside the panel stays visible. Holding `?` keeps help open rather
+than toggling it repeatedly.
 
 Movement follows the colemak diamond (`u` = up, `e` = down), as in a colemak
 vim setup. `i` — the diamond's right slot — stays on invert colors: a reader
@@ -81,9 +83,8 @@ centred with room around the edges. Short outlines keep the same frame, with
 unused chapter slots left blank. Move with `e` / `u` (or `j` / `k`, arrows),
 `E` / `U` jump ten, `g` / `G` go to the ends, `Enter` jumps to the selected
 chapter. `-` shrinks the panel; `+` / `=` enlarges it again (counts work,
-e.g. `5+`), up to the default height. `q` / `Esc` closes the panel. `t`
-deliberately does **not** close it: the key that opens a mode must not also
-close it, or holding it oscillates the overlay open and shut.
+e.g. `5+`), up to the default height. Press `t` again to close the panel;
+`q` / `Esc` also closes it without changing your page.
 
 ## Dual-page spreads
 

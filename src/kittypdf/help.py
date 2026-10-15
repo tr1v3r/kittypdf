@@ -2,7 +2,6 @@
 
 import textwrap
 
-from . import graphics
 from .toc import _ACCENT, _BG, _BORDER, _MUTED, _PAPER, _RESET, _pad, _panel_size, _panel_width
 
 _READER_KEYS = (
@@ -36,7 +35,7 @@ _TOC_KEYS = (
     ("[count] + move / size", "Repeat movement or size change"),
     ("Enter", "Open selected chapter"),
     ("?", "Open keyboard shortcuts"),
-    ("q / Esc", "Close contents; t stays open"),
+    ("t / q / Esc", "Close contents"),
     ("Ctrl-C", "Quit and save progress"),
 )
 _HELP_KEYS = (
@@ -119,8 +118,8 @@ def help_loop(term, context="reader"):
     framed = term.cols >= 30 and term.rows >= 10
     width = _panel_width(term) - 3 if framed else max(1, term.cols - 1)
     lines = _lines(width, context)
-    graphics.delete_all(term)
-    term.write("\x1b[2J")
+    # Like contents, paint only the card's cells. Keep the PDF image and all
+    # cells outside the card intact so the page remains visible around it.
     top, visible = _draw(term, lines, 0)
     while True:
         event = term.read_key(timeout=0.25)

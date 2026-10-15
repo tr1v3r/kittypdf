@@ -6,7 +6,7 @@ The page stays visible outside the panel; the caller restores it on exit.
 import re
 
 # Keys: e/j/down move down, u/k/up move up, E/U big jumps, g/G ends,
-# +/- adjusts visible chapters, Enter jumps, q/Esc closes, Ctrl-C quits.
+# +/- adjusts visible chapters, Enter jumps, t/q/Esc closes, Ctrl-C quits.
 # Counts multiply moves and size changes.
 
 _BIG_JUMP = 10
@@ -154,7 +154,7 @@ def _draw(term, toc, sel, top, requested=None, previous_height=None):
                                          _ACCENT if active else _BORDER)))
 
     parts.extend([at(height - 3, "├" + "─" * inner + "┤", _BORDER),
-                  at(height - 2, body("↑↓ move  +/- size  Enter open  Esc close  ? help",
+                  at(height - 2, body("↑↓ move  +/- size  Enter open  t/Esc close  ? help",
                                       _MUTED)),
                   at(height - 1, "╰" + "─" * inner + "╯", _BORDER)])
     # Kitty's synchronized-update mode keeps the whole resize offscreen until
@@ -237,10 +237,7 @@ def toc_loop(term, toc, page0, redraw=None):
                 sel = len(toc) - 1
             elif val == " ":
                 sel = _clamp_sel(toc, sel + n)
-            elif val == "q":
-                # NB: 't' deliberately does NOT close the overlay: the key
-                # that opens a mode must not also close it, or holding it
-                # (key repeat) oscillates open/close forever.
+            elif val in ("t", "q"):
                 return ("cancel", None)
             else:
                 count = ""
