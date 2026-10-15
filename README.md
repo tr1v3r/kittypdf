@@ -113,6 +113,18 @@ remain opaque. Use `i` as well when dark text needs inverting for a dark kitty
 background. Kitty's `background_opacity` controls how much of the desktop is
 visible behind the terminal.
 
+## Page-turn performance
+
+New pages upload off-screen while the current page stays visible, then swap
+with the status bar in a short synchronized update (on supporting terminals,
+including kitty). This also applies to spreads, resize, and redraw; transparent
+pages keep their original alpha behavior.
+
+The reader caches up to 16 recent rendered pages/variants, capped at 64 MiB of
+PNG data, so revisiting them skips rasterization and PNG encoding. Changing
+size, invert, crop, or transparency uses a separate cache entry. First visits
+still need rendering and transfer; complex scans can take longer.
+
 ## Progress memory
 
 The last-read page, invert, crop, and transparent-paper settings are remembered

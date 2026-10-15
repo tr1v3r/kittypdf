@@ -185,7 +185,7 @@ class GraphicsTests(unittest.TestCase):
 
         self.assertEqual(sink.text, ["\x1b[3;4H"])
         self.assertEqual(bytes(sink.data),
-                         b"\x1b_Ga=p,i=9,z=-1073741825,C=1,q=2\x1b\\")
+                         b"\x1b_Ga=p,i=9,p=1,z=-1073741825,C=1,q=2\x1b\\")
 
 
 class FakeTerm:
@@ -524,10 +524,10 @@ class GfxDeleteAndProbeTests(unittest.TestCase):
         def write_bytes(self, data):
             self.written.append(data)
 
-    def test_delete_image_uses_d_i(self):
+    def test_delete_image_frees_data_with_uppercase_i(self):
         term = self.Term()
         graphics.delete_image(term, 7)
-        self.assertEqual(term.written, [b"\x1b_Ga=d,d=i,i=7,q=2\x1b\\"])
+        self.assertEqual(term.written, [b"\x1b_Ga=d,d=I,i=7,q=2\x1b\\"])
 
     def test_probe_response_parsing_is_strict(self):
         parse = graphics._parse_probe_response
