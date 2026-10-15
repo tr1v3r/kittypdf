@@ -425,19 +425,14 @@ def _loop(reader, doc, term, path, progress):
             elif val == "t":
                 term.drain_typeahead()  # drop repeat backlog before entering
                 action, value = toc_loop(term, doc.toc, reader.page, redraw=redraw)
-                term.drain_typeahead()  # and on the way out, so a held key
-                                        # cannot oscillate the overlay
+                term.drain_typeahead()  # drop queued repeats on the way out too
                 if action == "eof":
                     checkpoint()
                     return
                 if action == "jump":
                     reader.page = reader.clamp(value)
-                # The overlay cleared the screen; force a full re-transmit so
-                # the page image reappears. A place-only restore (same page,
-                # unchanged signature) does NOT bring the image back once the
-                # overlay's erase has dropped the placement -- which is why
-                # cancel (q/Esc) looked stuck on the ToC while Enter, which
-                # changes the page and re-transmits, worked.
+                # Erase the overlay cells and re-transmit the page, including
+                # when t/q/Esc returns without changing the current page.
                 reader.invalidate()
             elif val == "?":
                 term.drain_typeahead()

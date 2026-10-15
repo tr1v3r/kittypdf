@@ -6,7 +6,7 @@ The page stays visible outside the panel; the caller restores it on exit.
 import re
 
 # Keys: e/j/down move down, u/k/up move up, E/U big jumps, g/G ends,
-# +/- adjusts visible chapters, Enter jumps, q/Esc closes, Ctrl-C quits.
+# +/- adjusts visible chapters, Enter jumps, t/q/Esc closes, Ctrl-C quits.
 # Counts multiply moves and size changes.
 
 _BIG_JUMP = 10
@@ -77,15 +77,21 @@ def _safe_title(title):
     return "".join(ch if ch.isprintable() else " " for ch in title)
 
 
-def _panel_size(term, toc, requested):
-    """Clamp visible entries to the outline and the terminal's available rows."""
-    visible = max(1, min(requested, len(toc), term.rows - 10))
+def _panel_width(term):
+    """Shared card width for contents and keyboard help."""
+    return min(90, max(1, term.cols - 4))
+
+
+def _panel_size(term, requested=None):
+    """Use the available height by default, even with only a few entries."""
+    limit = max(1, term.rows - 8)
+    visible = limit if requested is None else max(1, min(requested, limit))
     return visible, visible + 6
 
 
 def _stale_rows(term, old_height, new_height):
     """Erase only rows the newly drawn panel no longer covers."""
-    width = min(66, term.cols - 4)
+    width = _panel_width(term)
     x = (term.cols - width) // 2 + 1
     old_y = (term.rows - old_height) // 2 + 1
     new_y = (term.rows - new_height) // 2 + 1
@@ -94,17 +100,17 @@ def _stale_rows(term, old_height, new_height):
                    if not new_y <= row < new_y + new_height)
 
 
-def _draw(term, toc, sel, top, requested=15, previous_height=None):
+def _draw(term, toc, sel, top, requested=None, previous_height=None):
     cols, rows = term.cols, term.rows
-    if cols < 30 or rows < 12:
+    if cols < 30 or rows < 10:
         # Tiny terminals have room for only one useful line, not a frame.
         line = _pad(f" {sel + 1}/{len(toc)}  {_safe_title(toc[sel][1])}"
                     f"  p.{toc[sel][2]}", max(0, cols - 1))
         term.write(f"\x1b[{max(1, rows // 2)};1H{_BG}{_PAPER}{line}{_RESET}")
         return sel
 
-    width = min(66, cols - 4)
-    visible, height = _panel_size(term, toc, requested)
+    width = _panel_width(term)
+    visible, height = _panel_size(term, requested)
     x = (cols - width) // 2 + 1
     y = (rows - height) // 2 + 1
     inner = width - 2
@@ -148,7 +154,7 @@ def _draw(term, toc, sel, top, requested=15, previous_height=None):
                                          _ACCENT if active else _BORDER)))
 
     parts.extend([at(height - 3, "├" + "─" * inner + "┤", _BORDER),
-                  at(height - 2, body("↑↓ move  +/- size  Enter open  Esc close  ? help",
+                  at(height - 2, body("↑↓ move  +/- size  Enter open  t/Esc close  ? help",
                                       _MUTED)),
                   at(height - 1, "╰" + "─" * inner + "╯", _BORDER)])
     # Kitty's synchronized-update mode keeps the whole resize offscreen until
@@ -168,7 +174,7 @@ def toc_loop(term, toc, page0, redraw=None):
         return ("cancel", None)
     sel = _initial_sel(toc, page0)
     top = 0
-    visible_rows = max(1, min(15, len(toc), term.rows - 10))
+    visible_rows = _panel_size(term)[0]
     top = _draw(term, toc, sel, top, visible_rows)
     count = ""
     while True:
@@ -208,11 +214,11 @@ def toc_loop(term, toc, page0, redraw=None):
                 continue
             if val in ("+", "=", "-", "_"):
                 delta = n if val in ("+", "=") else -n
-                limit = max(1, min(len(toc), term.rows - 10))
+                limit = _panel_size(term)[0]
                 new_rows = max(1, min(limit, visible_rows + delta))
                 count = ""
                 if new_rows != visible_rows:
-                    old_height = _panel_size(term, toc, visible_rows)[1]
+                    old_height = _panel_size(term, visible_rows)[1]
                     visible_rows = new_rows
                     top = _draw(term, toc, sel, top, visible_rows,
                                 previous_height=old_height)
@@ -231,10 +237,7 @@ def toc_loop(term, toc, page0, redraw=None):
                 sel = len(toc) - 1
             elif val == " ":
                 sel = _clamp_sel(toc, sel + n)
-            elif val == "q":
-                # NB: 't' deliberately does NOT close the overlay: the key
-                # that opens a mode must not also close it, or holding it
-                # (key repeat) oscillates open/close forever.
+            elif val in ("t", "q"):
                 return ("cancel", None)
             else:
                 count = ""
