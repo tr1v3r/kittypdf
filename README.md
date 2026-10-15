@@ -22,6 +22,12 @@ kittypdf -V                     # version
 
 ## Keys
 
+Press `?` in the reader or table of contents to open the scrollable keyboard
+reference. It lists all reader, contents, and help bindings, with the current
+view first. Use `e` / `u` (or arrows) to scroll, `PgDn` / `PgUp` for a screen,
+and `q` / `Esc` to return without changing your page or chapter selection.
+Holding `?` keeps help open rather than toggling it repeatedly.
+
 Movement follows the colemak diamond (`u` = up, `e` = down), as in a colemak
 vim setup. `i` — the diamond's right slot — stays on invert colors: a reader
 has no horizontal motion, so nothing competes for it.
@@ -53,7 +59,8 @@ has no horizontal motion, so nothing competes for it.
 | `a` | toggle transparent unpainted paper (alpha mode) |
 | `c` | toggle autocrop (trim page margins) |
 | `d` | cycle page layout: auto → single → dual |
-| `r` / `Ctrl-L` | redraw current page |
+| `r` / `R` / `Ctrl-L` | redraw current page |
+| `?` | show all keyboard shortcuts |
 
 **Quitting**
 

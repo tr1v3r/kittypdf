@@ -148,7 +148,7 @@ def _draw(term, toc, sel, top, requested=15, previous_height=None):
                                          _ACCENT if active else _BORDER)))
 
     parts.extend([at(height - 3, "├" + "─" * inner + "┤", _BORDER),
-                  at(height - 2, body("↑↓ move   +/- size   Enter open   Esc close",
+                  at(height - 2, body("↑↓ move  +/- size  Enter open  Esc close  ? help",
                                       _MUTED)),
                   at(height - 1, "╰" + "─" * inner + "╯", _BORDER)])
     # Kitty's synchronized-update mode keeps the whole resize offscreen until
@@ -159,7 +159,7 @@ def _draw(term, toc, sel, top, requested=15, previous_height=None):
     return top
 
 
-def toc_loop(term, toc, page0):
+def toc_loop(term, toc, page0, redraw=None):
     """Run the overlay.
 
     Returns ("jump", page0_based), ("cancel",) or ("eof",).
@@ -187,6 +187,24 @@ def toc_loop(term, toc, page0):
         if kind == "char":
             if val.isdigit():
                 count += val
+                continue
+            if val == "?":
+                # Import lazily: the help card shares this module's styling.
+                from .help import help_loop
+
+                term.drain_typeahead()
+                action = help_loop(term, context="toc")
+                term.drain_typeahead()
+                if action == "eof":
+                    return ("eof", None)
+                if action == "resize":
+                    return ("cancel", None)
+                if redraw is not None:
+                    redraw()
+                else:
+                    term.write("\x1b[2J")
+                count = ""
+                top = _draw(term, toc, sel, top, visible_rows)
                 continue
             if val in ("+", "=", "-", "_"):
                 delta = n if val in ("+", "=") else -n

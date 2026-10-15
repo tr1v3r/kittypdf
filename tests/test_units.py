@@ -20,6 +20,7 @@ import pymupdf
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from kittypdf import help as help_mod  # noqa: E402
 from kittypdf import term as term_mod  # noqa: E402
 from kittypdf import toc  # noqa: E402
 from kittypdf.app import Reader, _loop  # noqa: E402
@@ -442,6 +443,84 @@ def run_loop(events, resizes=()):
     return reader, term, progress
 
 
+class HelpLoopTests(unittest.TestCase):
+    def run_help(self, events, cols=80, rows=31, resizes=(), context="reader"):
+        term = LoopFakeTerm(events, resizes)
+        term.cols, term.rows = cols, rows
+        with mock.patch("kittypdf.help.graphics.delete_all"):
+            result = help_mod.help_loop(term, context=context)
+        return result, term
+
+    def test_reference_includes_all_contexts_and_aliases(self):
+        lines = "\n".join(text for text, _ in help_mod._lines(100, "reader"))
+        for text in ("READING / PAGING", "TABLE OF CONTENTS", "KEYBOARD HELP",
+                     "r / R / Ctrl-L", "u / k / b / Up", "- / _", "[page]gg",
+                     "transparent", "Ctrl-C"):
+            self.assertIn(text, lines)
+        toc_lines = help_mod._lines(100, "toc")
+        self.assertEqual(toc_lines[0][0], "TABLE OF CONTENTS")
+
+    def test_wrapping_preserves_all_reference_text(self):
+        entries = (*help_mod._READER_KEYS, *help_mod._TOC_KEYS, *help_mod._HELP_KEYS)
+        # Compare without whitespace because wrapping changes only spacing.
+        expected = "".join("".join((key + action).split()) for key, action in entries)
+        for width in (1, 2, 10, 25, 73):
+            with self.subTest(width=width):
+                lines = help_mod._lines(width, "reader")
+                self.assertTrue(all(len(text) <= width for text, _ in lines))
+                self.assertEqual("".join("".join(text.split()) for text, _ in lines),
+                                 expected)
+
+    def test_close_quit_and_repeated_opener(self):
+        for event, expected in ((('char', 'q'), 'cancel'), (('esc', ''), 'cancel'),
+                                (('ctrl', 'C'), 'eof'), (('eof', ''), 'eof')):
+            with self.subTest(event=event):
+                result, term = self.run_help([("char", "?"), event])
+                self.assertEqual(result, expected)
+                self.assertEqual(len(term.output), 2)  # clear + one stable card
+
+    def test_scroll_reaches_all_sections_and_home_restores_start(self):
+        result, term = self.run_help([None, ("char", "E"), ("key", "pgdn"),
+                                      ("key", "end"), ("key", "home"),
+                                      ("char", "q")])
+        self.assertEqual(result, "cancel")
+        drawings = [text for text in term.output if "SHORTCUTS" in text]
+        self.assertEqual(len(drawings), 5)
+        self.assertIn("KEYBOARD HELP", "".join(drawings))
+        self.assertEqual(drawings[0], drawings[-1])
+
+    def test_up_down_and_page_aliases(self):
+        _, term = self.run_help([("char", "e"), ("char", "u"),
+                                 ("char", "E"), ("char", "U"),
+                                 ("key", "pgdn"), ("key", "pgup"),
+                                 ("key", "down"), ("key", "up"),
+                                 ("enter", "\r"), ("char", "k"),
+                                 ("char", "G"), ("char", "g"),
+                                 ("char", "q")])
+        drawings = [text for text in term.output if "SHORTCUTS" in text]
+        for drawing in drawings[2::2]:
+            self.assertEqual(drawing, drawings[0])
+
+    def test_tiny_terminal_never_draws_out_of_bounds(self):
+        import re
+
+        for cols, rows in ((80, 31), (30, 10), (10, 4), (2, 2), (1, 1)):
+            with self.subTest(cols=cols, rows=rows):
+                _, term = self.run_help([("char", "G"), ("char", "q")], cols, rows)
+                for drawing in term.output:
+                    for row, col, content in re.findall(
+                            r"\x1b\[(\d+);(\d+)H([^\x1b]*(?:\x1b\[[0-9;]*m[^\x1b]*)*)",
+                            drawing):
+                        plain = re.sub(r"\x1b\[[0-9;]*m", "", content)
+                        self.assertLessEqual(int(row), rows)
+                        self.assertGreaterEqual(int(row), 1)
+                        self.assertLessEqual(int(col) + toc._dw(plain) - 1, cols)
+
+    def test_resize_returns_to_caller_for_relayout(self):
+        result, _ = self.run_help([None], resizes=[True])
+        self.assertEqual(result, "resize")
+
+
 class LoopDispatchTests(unittest.TestCase):
     def test_quit_checkpoints_progress(self):
         _, _, progress = run_loop([("char", "q")])
@@ -501,6 +580,55 @@ class LoopDispatchTests(unittest.TestCase):
         reader, _, progress = run_loop([("char", "t"), ("ctrl", "C")])
         self.assertEqual(reader.page, 0)
         progress.save.assert_called_once()
+
+    def test_help_round_trip_restores_page_and_clears_pending_navigation(self):
+        with mock.patch.object(Reader, "invalidate", autospec=True,
+                               side_effect=Reader.invalidate) as invalidate:
+            reader, term, _ = run_loop([("char", "3"), ("char", "g"),
+                                        ("char", "?"), ("esc", ""),
+                                        ("char", "g"), ("char", "e"),
+                                        ("char", "q")])
+        self.assertEqual(reader.page, 1)
+        self.assertEqual(invalidate.call_count, 2)  # initial draw + help restore
+        self.assertEqual(term.drains, 2)
+        self.assertIn("SHORTCUTS", "".join(term.output))
+
+    def test_help_does_not_apply_reading_toggles(self):
+        reader, _, _ = run_loop([("char", "?"), ("char", "i"),
+                                 ("char", "a"), ("char", "c"),
+                                 ("char", "d"), ("char", "q"),
+                                 ("char", "q")])
+        self.assertFalse(reader.invert or reader.transparent or reader.autocrop)
+        self.assertEqual(reader.mode, "auto")
+        self.assertEqual(reader.page, 0)
+
+    def test_help_eof_and_ctrl_c_checkpoint_progress(self):
+        for event in (("eof", ""), ("ctrl", "C")):
+            with self.subTest(event=event):
+                _, _, progress = run_loop([("char", "?"), event])
+                progress.save.assert_called_once()
+
+    def test_toc_help_restores_selection_size_and_page(self):
+        reader, term, _ = run_loop([("char", "t"), ("char", "e"),
+                                    ("char", "-"), ("char", "?"),
+                                    ("char", "q"), ("enter", "\r"),
+                                    ("char", "q")])
+        self.assertEqual(reader.page, 4)
+        self.assertEqual(term.drains, 4)
+        output = "".join(term.output)
+        self.assertIn("TABLE OF CONTENTS", output)
+        drawings = [text for text in term.output if "CONTENTS" in text
+                    and "SHORTCUTS" not in text]
+        # The size-change frame also erases stale rows outside the card.
+        self.assertEqual(drawings[-1].rsplit("╯", 1)[0],
+                         drawings[-2].rsplit("╯", 1)[0])
+
+    def test_toc_help_quit_and_resize(self):
+        _, _, progress = run_loop([("char", "t"), ("char", "?"), ("ctrl", "C")])
+        progress.save.assert_called_once()
+        reader, _, _ = run_loop([("char", "t"), ("char", "?"), None,
+                                 ("char", "q")], resizes=[False, False, True])
+        self.assertEqual(reader.page, 0)
 
     def test_ctrl_l_invalidates_without_moving(self):
         reader, _, _ = run_loop([("char", "2"), ("char", "e"), ("ctrl", "L"),
