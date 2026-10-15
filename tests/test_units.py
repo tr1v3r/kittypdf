@@ -257,10 +257,45 @@ class TocLoopTests(unittest.TestCase):
         _, term = self.run_toc([("enter", "\r")])
         output = "".join(term.output)
         self.assertNotIn("\x1b[2J", output)
-        self.assertIn("\x1b[12;8H", output)  # 66x9 panel centred in 80x31
+        self.assertIn("\x1b[2;3H", output)  # 76x29 panel centred in 80x31
         self.assertIn("CONTENTS", output)
         self.assertIn("Enter open", output)
         self.assertIn("Chapter One", output)
+
+    def test_default_frame_matches_help_for_short_and_long_outlines(self):
+        import re
+
+        def borders(output):
+            return re.findall(r"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*"
+                              r"([╭╰]─+[╮╯])", output)
+
+        for cols, rows in ((30, 10), (80, 31), (120, 40), (200, 100)):
+            for chapters in (1, 3, 100):
+                with self.subTest(cols=cols, rows=rows, chapters=chapters):
+                    entries = [(1, f"Chapter {i}", i + 1) for i in range(chapters)]
+                    term = FakeTocTerm([("char", "q")], cols=cols, rows=rows)
+                    toc.toc_loop(term, entries, 0)
+                    toc_frame = borders("".join(term.output))
+                    term.output.clear()
+                    lines = help_mod._lines(toc._panel_width(term) - 3, "reader")
+                    help_mod._draw(term, lines, 0)
+                    self.assertEqual(toc_frame, borders("".join(term.output)))
+                    self.assertEqual(len(toc_frame), 2)
+                    top, bottom = toc_frame
+                    self.assertEqual(len(top[2]), min(90, cols - 4))
+                    self.assertEqual(int(bottom[0]) - int(top[0]) + 1, rows - 2)
+
+    def test_short_outline_keeps_full_frame_and_resizes_without_moving(self):
+        result, term = self.run_toc([("char", "G"), ("char", "9"), ("char", "-"),
+                                     ("char", "9"), ("char", "+"), ("enter", "\r")])
+        self.assertEqual(result, ("jump", 10))
+        drawings = [part for part in term.output if "CONTENTS" in part]
+        self.assertEqual(len(drawings), 4)
+        self.assertIn("3 shown", drawings[0])  # count entries, not blank slots
+        self.assertEqual(drawings[0].count("│") // 2, 25)  # 23 slots + heading/footer
+        self.assertEqual(drawings[2].count("│") // 2, 16)  # 14 slots + heading/footer
+        self.assertEqual(drawings[3].count("│") // 2, 25)
+        self.assertIn("03 / 03", drawings[-1])
 
     def test_long_outline_scrolls_inside_panel(self):
         entries = [(1, f"Chapter {i}", i + 1) for i in range(40)]
@@ -273,22 +308,24 @@ class TocLoopTests(unittest.TestCase):
 
     def test_plus_minus_resize_and_restore_page_around_panel(self):
         entries = [(1, f"Chapter {i}", i + 1) for i in range(40)]
-        term = FakeTocTerm([("char", "+"), ("char", "-"), ("enter", "\r")])
+        term = FakeTocTerm([("char", "2"), ("char", "-"),
+                            ("char", "2"), ("char", "+"), ("enter", "\r")])
         result = toc.toc_loop(term, entries, 0)
         self.assertEqual(result, ("jump", 0))
         drawings = [part for part in term.output if "CONTENTS" in part]
         self.assertEqual(len(drawings), 3)  # no separate clear/write flush
         self.assertEqual(len(term.output), 3)
-        self.assertIn("15 shown", drawings[0])
-        self.assertIn("16 shown", drawings[1])
-        self.assertIn("15 shown", drawings[2])
+        self.assertIn("23 shown", drawings[0])
+        self.assertIn("21 shown", drawings[1])
+        self.assertIn("23 shown", drawings[2])
         for drawing in drawings:
             self.assertTrue(drawing.startswith("\x1b[?2026h"))
             self.assertTrue(drawing.endswith("\x1b[?2026l"))
-        self.assertIn("\x1b[5;8H", drawings[1])  # taller card is re-centred
-        self.assertIn("\x1b[6;8H", drawings[2])
-        self.assertNotIn("\x1b[0m" + " " * 66, drawings[1])  # no erase on grow
-        self.assertIn("\x1b[5;8H\x1b[0m" + " " * 66, drawings[2])
+        self.assertIn("\x1b[3;3H", drawings[1])  # smaller card is re-centred
+        self.assertIn("\x1b[2;3H", drawings[2])
+        for row in (2, 30):
+            self.assertIn(f"\x1b[{row};3H\x1b[0m" + " " * 76, drawings[1])
+        self.assertNotIn("\x1b[0m" + " " * 76, drawings[2])  # no erase on grow
         self.assertNotIn("\x1b[2J", "".join(term.output))
 
     def test_resize_count_and_terminal_bounds(self):
@@ -301,8 +338,8 @@ class TocLoopTests(unittest.TestCase):
                             ("enter", "\r")])
         toc.toc_loop(term, entries, 0)
         drawings = [part for part in term.output if "CONTENTS" in part]
-        self.assertEqual(len(drawings), 5)  # hitting the maximum does not redraw
-        for drawing, expected in zip(drawings, (15, 21, 12, 3, 1), strict=True):
+        self.assertEqual(len(drawings), 4)  # already at maximum; growth is a no-op
+        for drawing, expected in zip(drawings, (23, 14, 5, 1), strict=True):
             self.assertIn(f"{expected} shown", drawing)
 
     def test_draw_sanitizes_outline_controls(self):

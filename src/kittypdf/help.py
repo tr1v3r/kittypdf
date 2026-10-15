@@ -3,7 +3,7 @@
 import textwrap
 
 from . import graphics
-from .toc import _ACCENT, _BG, _BORDER, _MUTED, _PAPER, _RESET, _pad
+from .toc import _ACCENT, _BG, _BORDER, _MUTED, _PAPER, _RESET, _pad, _panel_size, _panel_width
 
 _READER_KEYS = (
     ("READING / PAGING", ""),
@@ -70,10 +70,13 @@ def _draw(term, lines, top):
     """Draw a bounded card, with a minimal unframed fallback for tiny windows."""
     cols, rows = max(1, term.cols), max(1, term.rows)
     framed = cols >= 30 and rows >= 10
-    width = min(90, cols - 4) if framed else max(1, cols - 1)
-    visible = min(len(lines), max(1, rows - 8)) if framed else max(1, rows - 2)
+    width = _panel_width(term) if framed else max(1, cols - 1)
+    if framed:
+        visible, height = _panel_size(term)
+    else:
+        visible = max(1, rows - 2)
+        height = min(rows, visible + 2)
     top = max(0, min(top, max(0, len(lines) - visible)))
-    height = visible + 6 if framed else min(rows, visible + 2)
     x = (cols - width) // 2 + 1 if framed else 1
     y = (rows - height) // 2 + 1 if framed else 1
     inner = width - 2 if framed else width
@@ -92,7 +95,9 @@ def _draw(term, lines, top):
         at(2, "├" + "─" * inner + "┤", _BORDER)
     elif rows >= 2:
         at(0, _pad(title, width), _ACCENT)
-    for offset, (text, heading) in enumerate(lines[top:top + visible]):
+    for offset in range(visible):
+        i = top + offset
+        text, heading = lines[i] if i < len(lines) else ("", False)
         row = offset + (3 if framed else int(rows >= 2))
         if row >= height:
             break
@@ -112,7 +117,7 @@ def _draw(term, lines, top):
 def help_loop(term, context="reader"):
     """Return cancel, resize, or eof; the caller restores the underlying view."""
     framed = term.cols >= 30 and term.rows >= 10
-    width = min(90, term.cols - 4) - 3 if framed else max(1, term.cols - 1)
+    width = _panel_width(term) - 3 if framed else max(1, term.cols - 1)
     lines = _lines(width, context)
     graphics.delete_all(term)
     term.write("\x1b[2J")

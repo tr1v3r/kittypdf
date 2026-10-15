@@ -75,13 +75,15 @@ has no horizontal motion, so nothing competes for it.
 
 ## Table of contents
 
-`t` opens a floating chapter list over the PDF page. Move with `e` / `u`
-(or `j` / `k`, arrows), `E` / `U` jump ten, `g` / `G` go to the ends, `Enter`
-jumps to the selected chapter. `+` / `-` changes the number of visible
-chapters (`=` also enlarges; counts work, e.g. `5+`), up to the terminal's
-available height. `q` / `Esc` closes the panel. `t` deliberately does **not**
-close it: the key that opens a mode must not also close it, or holding it
-oscillates the overlay open and shut.
+`t` opens a floating chapter list over the PDF page. Its default size matches
+keyboard help: up to 90 columns wide and the terminal height minus two rows,
+centred with room around the edges. Short outlines keep the same frame, with
+unused chapter slots left blank. Move with `e` / `u` (or `j` / `k`, arrows),
+`E` / `U` jump ten, `g` / `G` go to the ends, `Enter` jumps to the selected
+chapter. `-` shrinks the panel; `+` / `=` enlarges it again (counts work,
+e.g. `5+`), up to the default height. `q` / `Esc` closes the panel. `t`
+deliberately does **not** close it: the key that opens a mode must not also
+close it, or holding it oscillates the overlay open and shut.
 
 ## Dual-page spreads
 
