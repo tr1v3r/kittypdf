@@ -25,10 +25,14 @@ kittypdf -V                     # version
 Press `?` in the reader or table of contents to open the scrollable keyboard
 reference. It lists all reader, contents, and help bindings, with the current
 view first. Use `e` / `u` (or arrows) to scroll, `PgDn` / `PgUp` for a screen,
-and `q` / `Esc` to return without changing your page or chapter selection.
+and `?` / `q` / `Esc` to return without changing your page or chapter selection.
 Like the contents panel, help floats over the page without clearing the PDF;
-content outside the panel stays visible. Holding `?` keeps help open rather
-than toggling it repeatedly.
+content outside the panel stays visible. Press `?` again to close help.
+Both panels use a raised Tokyo Night background (`#24283b`), distinct from
+the theme's default canvas (`#1a1b26`), so they mask the PDF even with terminal
+transparency enabled. Kitty requires a non-default cell background to cover
+the page image; a custom theme should keep its default background different
+from the panel background.
 
 Movement follows the colemak diamond (`u` = up, `e` = down), as in a colemak
 vim setup. `i` — the diamond's right slot — stays on invert colors: a reader

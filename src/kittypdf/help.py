@@ -21,7 +21,7 @@ _READER_KEYS = (
     ("c", "Toggle margin autocrop"),
     ("d", "Cycle layout: auto -> single -> dual"),
     ("r / R / Ctrl-L", "Redraw page"),
-    ("?", "Open keyboard shortcuts"),
+    ("?", "Toggle keyboard shortcuts"),
     ("q / Q / Ctrl-C", "Quit and save progress"),
 )
 _TOC_KEYS = (
@@ -34,7 +34,7 @@ _TOC_KEYS = (
     ("- / _", "Show fewer chapters"),
     ("[count] + move / size", "Repeat movement or size change"),
     ("Enter", "Open selected chapter"),
-    ("?", "Open keyboard shortcuts"),
+    ("?", "Toggle keyboard shortcuts"),
     ("t / q / Esc", "Close contents"),
     ("Ctrl-C", "Quit and save progress"),
 )
@@ -44,7 +44,7 @@ _HELP_KEYS = (
     ("u / k / Up", "Scroll up"),
     ("E / U / PgDn / PgUp", "Scroll down / up one screen"),
     ("g / Home / G / End", "First / last line (g/Home, G/End)"),
-    ("q / Esc", "Close help; ? stays open"),
+    ("? / q / Esc", "Close help"),
     ("Ctrl-C", "Quit and save progress"),
 )
 
@@ -102,7 +102,7 @@ def _draw(term, lines, top):
             break
         color = _ACCENT if heading else _PAPER
         at(row, body(text, color) if framed else _pad(text, width), color)
-    footer = "e/u scroll  PgDn/PgUp page  q/Esc close"
+    footer = "e/u scroll  PgDn/PgUp page  ?/q/Esc close"
     if framed:
         at(height - 3, "├" + "─" * inner + "┤", _BORDER)
         at(height - 2, body(footer, _MUTED))
@@ -130,7 +130,7 @@ def help_loop(term, context="reader"):
         kind, val = event
         if kind == "eof" or (kind == "ctrl" and val == "C"):
             return "eof"
-        if kind == "esc" or (kind == "char" and val == "q"):
+        if kind == "esc" or (kind == "char" and val in ("?", "q")):
             return "cancel"
         if ((kind == "char" and val in ("e", "j", " "))
                 or (kind == "key" and val == "down") or kind == "enter"):
@@ -147,5 +147,5 @@ def help_loop(term, context="reader"):
         elif (kind, val) in (("char", "G"), ("key", "end")):
             top = len(lines)
         else:
-            continue  # '?' repeats never oscillate the overlay open/closed.
+            continue
         top, visible = _draw(term, lines, top)

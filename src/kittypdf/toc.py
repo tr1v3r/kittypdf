@@ -54,9 +54,12 @@ def _initial_sel(toc, page0):
     return sel
 
 
-# Tokyo Night: night background, blue selection rail, subdued borders.
+# Tokyo Night: raised panel, blue selection rail, subdued borders.
 # The terminal's monospace face keeps outline numbers and page indices aligned.
-_BG = "\x1b[48;2;26;27;38m"          # #1a1b26
+# Keep the panel distinct from Tokyo Night's default canvas (#1a1b26).
+# Kitty compares resolved RGB values: even an explicit SGR background equal
+# to the default is drawn below the PDF, rather than masking it (_PAGE_Z).
+_BG = "\x1b[48;2;36;40;59m"          # #24283b
 _SELECTED = "\x1b[48;2;41;46;66m"    # #292e42
 _PAPER = "\x1b[38;2;192;202;245m"   # #c0caf5
 _MUTED = "\x1b[38;2;169;177;214m"   # #a9b1d6
