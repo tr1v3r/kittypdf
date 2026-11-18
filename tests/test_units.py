@@ -11,6 +11,7 @@ Focus (all chosen because bugs have lived here or are known-open):
 """
 
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -263,6 +264,36 @@ class TocLoopTests(unittest.TestCase):
         self.assertIn("Enter open", output)
         self.assertIn("Chapter One", output)
 
+    def test_all_overlay_cells_mask_pdf_on_tokyo_night(self):
+        # Kitty's below-background graphics plane is covered only by cells
+        # whose resolved background RGB differs from the default canvas.
+        # Check the emitted styles, including blanks, borders and selection,
+        # for both cards and the tiny-terminal fallbacks.
+        canvas = (26, 27, 38)  # Tokyo Night's default #1a1b26
+        for cols, rows in ((80, 31), (30, 10), (10, 4), (1, 1)):
+            for panel in ("toc", "help"):
+                with self.subTest(cols=cols, rows=rows, panel=panel):
+                    term = FakeTocTerm([], cols=cols, rows=rows)
+                    if panel == "toc":
+                        toc._draw(term, TOC, 0, 0)
+                    else:
+                        help_mod._draw(term, help_mod._lines(20, "reader"), 0)
+                    background = canvas
+                    painted = 0
+                    for token in re.split(r"(\x1b\[[0-?]*[ -/]*[@-~])",
+                                          "".join(term.output)):
+                        if token.startswith("\x1b["):
+                            if token == "\x1b[0m":
+                                background = canvas
+                            elif token.startswith("\x1b[48;2;"):
+                                background = tuple(map(int, token[7:-1].split(";")))
+                        elif token:
+                            self.assertNotEqual(background, canvas)
+                            painted += len(token)
+                    # A one-column ToC fallback deliberately paints no text.
+                    if cols > 1:
+                        self.assertGreater(painted, 0)
+
     def test_default_frame_matches_help_for_short_and_long_outlines(self):
         import re
 
@@ -508,13 +539,23 @@ class HelpLoopTests(unittest.TestCase):
                 self.assertEqual("".join("".join(text.split()) for text, _ in lines),
                                  expected)
 
-    def test_close_quit_and_repeated_opener(self):
-        for event, expected in ((('char', 'q'), 'cancel'), (('esc', ''), 'cancel'),
+    def test_close_and_quit(self):
+        for event, expected in ((('char', '?'), 'cancel'), (('char', 'q'), 'cancel'),
+                                (('esc', ''), 'cancel'),
                                 (('ctrl', 'C'), 'eof'), (('eof', ''), 'eof')):
             with self.subTest(event=event):
-                result, term = self.run_help([("char", "?"), event])
+                result, term = self.run_help([event])
                 self.assertEqual(result, expected)
                 self.assertEqual(len(term.output), 1)  # one stable overlay, no clear
+
+    def test_question_mark_closes_without_consuming_following_keys(self):
+        for context in ("reader", "toc"):
+            with self.subTest(context=context):
+                result, term = self.run_help([("char", "?"), ("char", "j")],
+                                             context=context)
+                self.assertEqual(result, "cancel")
+                self.assertEqual(term.events, [("char", "j")])
+                self.assertIn("?/q/Esc close", "".join(term.output))
 
     def test_help_never_clears_screen_or_deletes_pdf_images(self):
         for cols, rows in ((120, 40), (80, 31), (10, 4), (1, 1)):
@@ -670,6 +711,13 @@ class LoopDispatchTests(unittest.TestCase):
         self.assertEqual(term.drains, 2)
         self.assertIn("SHORTCUTS", "".join(term.output))
 
+    def test_question_mark_toggles_help_and_reader_navigation_resumes(self):
+        reader, term, _ = run_loop([("char", "?"), ("char", "?"),
+                                    ("char", "e"), ("char", "q")])
+        self.assertEqual(reader.page, 1)
+        self.assertEqual(term.drains, 2)
+        self.assertEqual(sum("SHORTCUTS" in text for text in term.output), 1)
+
     def test_help_does_not_apply_reading_toggles(self):
         reader, _, _ = run_loop([("char", "?"), ("char", "i"),
                                  ("char", "a"), ("char", "c"),
@@ -688,7 +736,7 @@ class LoopDispatchTests(unittest.TestCase):
     def test_toc_help_restores_selection_size_and_page(self):
         reader, term, _ = run_loop([("char", "t"), ("char", "e"),
                                     ("char", "-"), ("char", "?"),
-                                    ("char", "q"), ("enter", "\r"),
+                                    ("char", "?"), ("enter", "\r"),
                                     ("char", "q")])
         self.assertEqual(reader.page, 4)
         self.assertEqual(term.drains, 4)
